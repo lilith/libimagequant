@@ -21,41 +21,97 @@ pub fn liq_get_palette_impl(r: &mut QuantizationResult) -> &Palette {
 }
 
 #[must_use]
-pub unsafe fn liq_image_create_rgba_rows_impl<'rows>(attr: &Attributes, rows: &'rows [*const RGBA], width: u32, height: u32, gamma: f64) -> Option<crate::image::Image<'rows>> {
-    let rows = SeaCow::borrowed(&*(rows as *const [*const rgb::Rgba<u8>] as *const [Pointer<rgb::Rgba<u8>>]));
+pub unsafe fn liq_image_create_rgba_rows_impl<'rows>(
+    attr: &Attributes,
+    rows: &'rows [*const RGBA],
+    width: u32,
+    height: u32,
+    gamma: f64,
+) -> Option<crate::image::Image<'rows>> {
+    let rows = SeaCow::borrowed(
+        &*(rows as *const [*const rgb::Rgba<u8>] as *const [Pointer<rgb::Rgba<u8>>]),
+    );
     let rows_slice = rows.as_slice();
     if rows_slice.iter().any(|r| r.0.is_null()) {
         return None;
     }
-    crate::image::Image::new_internal(attr, crate::rows::PixelsSource::Pixels { rows, pixels: None }, width, height, gamma).ok()
+    crate::image::Image::new_internal(
+        attr,
+        crate::rows::PixelsSource::Pixels { rows, pixels: None },
+        width,
+        height,
+        gamma,
+    )
+    .ok()
 }
 
 #[must_use]
-pub unsafe fn liq_image_create_rgba_bitmap_impl<'rows>(attr: &Attributes, rows: Box<[*const RGBA]>, width: u32, height: u32, gamma: f64) -> Option<crate::image::Image<'rows>> {
-    let rows = SeaCow::boxed(mem::transmute::<Box<[*const RGBA]>, Box<[Pointer<RGBA>]>>(rows));
+pub unsafe fn liq_image_create_rgba_bitmap_impl<'rows>(
+    attr: &Attributes,
+    rows: Box<[*const RGBA]>,
+    width: u32,
+    height: u32,
+    gamma: f64,
+) -> Option<crate::image::Image<'rows>> {
+    let rows = SeaCow::boxed(mem::transmute::<Box<[*const RGBA]>, Box<[Pointer<RGBA>]>>(
+        rows,
+    ));
     let rows_slice = rows.as_slice();
     if rows_slice.iter().any(|r| r.0.is_null()) {
         return None;
     }
-    crate::image::Image::new_internal(attr, crate::rows::PixelsSource::Pixels { rows, pixels: None }, width, height, gamma).ok()
+    crate::image::Image::new_internal(
+        attr,
+        crate::rows::PixelsSource::Pixels { rows, pixels: None },
+        width,
+        height,
+        gamma,
+    )
+    .ok()
 }
 
 #[must_use]
-pub unsafe fn liq_image_create_custom_impl<'rows>(attr: &Attributes, row_callback: Box<RowCallback<'rows>>, width: u32, height: u32, gamma: f64) -> Option<Image<'rows>> {
-    Image::new_internal(attr, crate::rows::PixelsSource::Callback(row_callback), width, height, gamma).ok()
+pub unsafe fn liq_image_create_custom_impl<'rows>(
+    attr: &Attributes,
+    row_callback: Box<RowCallback<'rows>>,
+    width: u32,
+    height: u32,
+    gamma: f64,
+) -> Option<Image<'rows>> {
+    Image::new_internal(
+        attr,
+        crate::rows::PixelsSource::Callback(row_callback),
+        width,
+        height,
+        gamma,
+    )
+    .ok()
 }
 
-pub unsafe fn liq_write_remapped_image_impl(result: &mut QuantizationResult, input_image: &mut Image, buffer_bytes: &mut [MaybeUninit<u8>]) -> Result<(), Error> {
+pub unsafe fn liq_write_remapped_image_impl(
+    result: &mut QuantizationResult,
+    input_image: &mut Image,
+    buffer_bytes: &mut [MaybeUninit<u8>],
+) -> Result<(), Error> {
     let rows = RowBitmapMut::new_contiguous(buffer_bytes, input_image.width());
     result.write_remapped_image_rows_internal(input_image, rows)
 }
 
-pub unsafe fn liq_write_remapped_image_rows_impl(result: &mut QuantizationResult, input_image: &mut Image, rows: &mut [*mut MaybeUninit<u8>]) -> Result<(), Error> {
+pub unsafe fn liq_write_remapped_image_rows_impl(
+    result: &mut QuantizationResult,
+    input_image: &mut Image,
+    rows: &mut [*mut MaybeUninit<u8>],
+) -> Result<(), Error> {
     let rows = RowBitmapMut::new(rows, input_image.width());
     result.write_remapped_image_rows_internal(input_image, rows)
 }
 
 /// Not recommended
-pub unsafe fn liq_image_set_memory_ownership_impl(image: &mut Image<'_>, own_rows: bool, own_pixels: bool, free_fn: unsafe extern "C" fn(*mut c_void)) -> Result<(), Error> {
+pub unsafe fn liq_image_set_memory_ownership_impl(
+    image: &mut Image<'_>,
+    own_rows: bool,
+    own_pixels: bool,
+    free_fn: unsafe extern "C" fn(*mut c_void),
+) -> Result<(), Error> {
     image.px.set_memory_ownership(own_rows, own_pixels, free_fn)
 }

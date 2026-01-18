@@ -1,5 +1,5 @@
-use core::slice::ChunksMut;
 use core::cell::OnceCell;
+use core::slice::ChunksMut;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use std::boxed::Box;
@@ -18,7 +18,10 @@ impl<T> ThreadLocal<T> {
     }
 
     #[inline(always)]
-    pub fn get_or_try<E>(&self, f: impl FnOnce() -> Result<T, E>) -> Result<&T, core::convert::Infallible> {
+    pub fn get_or_try<E>(
+        &self,
+        f: impl FnOnce() -> Result<T, E>,
+    ) -> Result<&T, core::convert::Infallible> {
         // https://github.com/rust-lang/rust/issues/109737
         Ok(self.0.get_or_init(move || f().ok().unwrap()))
     }
@@ -35,8 +38,14 @@ impl<T> IntoIterator for ThreadLocal<T> {
 }
 
 pub(crate) trait FakeRayonIter: Sized + Iterator {
-    fn par_bridge(self) -> Self { self }
-    fn for_each_init<I, F, T>(self, init: I, mut cb: F) where I: FnOnce() -> T, F: FnMut(&mut T, Self::Item) {
+    fn par_bridge(self) -> Self {
+        self
+    }
+    fn for_each_init<I, F, T>(self, init: I, mut cb: F)
+    where
+        I: FnOnce() -> T,
+        F: FnMut(&mut T, Self::Item),
+    {
         let mut tmp = init();
         for item in self {
             cb(&mut tmp, item);
@@ -44,9 +53,7 @@ pub(crate) trait FakeRayonIter: Sized + Iterator {
     }
 }
 
-
-impl<T: Iterator> FakeRayonIter for T where Self: Sized {
-}
+impl<T: Iterator> FakeRayonIter for T where Self: Sized {}
 
 pub(crate) trait FakeRayonIntoIter<T> {
     fn par_chunks_mut(&mut self, chunk_size: usize) -> ChunksMut<'_, T>;
@@ -70,13 +77,19 @@ pub(crate) struct SpawnMock;
 
 impl SpawnMock {
     #[inline(always)]
-    pub fn spawn<F, R>(&self, f: F) -> R where F: FnOnce(SpawnMock) -> R {
+    pub fn spawn<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(SpawnMock) -> R,
+    {
         f(SpawnMock)
     }
 }
 
 #[inline(always)]
-pub(crate) fn scope<F, R>(f: F) -> R where F: FnOnce(SpawnMock) -> R {
+pub(crate) fn scope<F, R>(f: F) -> R
+where
+    F: FnOnce(SpawnMock) -> R,
+{
     f(SpawnMock)
 }
 

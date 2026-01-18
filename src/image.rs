@@ -6,8 +6,8 @@ use crate::remap::DitherMapMode;
 use crate::rows::{DynamicRows, PixelsSource};
 use crate::seacow::{RowBitmap, SeaCow};
 use crate::{PushInCapacity, LIQ_HIGH_MEMORY_LIMIT};
-use rgb::prelude::*;
 use core::mem::{self, MaybeUninit};
+use rgb::prelude::*;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use crate::no_std_compat::*;
@@ -38,7 +38,16 @@ impl<'pixels> Image<'pixels> {
     ///
     /// Use `0.` for gamma if the image is sRGB (most images are).
     #[inline(always)]
-    pub fn new<VecRGBA>(attr: &Attributes, pixels: VecRGBA, width: usize, height: usize, gamma: f64) -> Result<Self, Error> where VecRGBA: Into<Box<[RGBA]>> {
+    pub fn new<VecRGBA>(
+        attr: &Attributes,
+        pixels: VecRGBA,
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Self, Error>
+    where
+        VecRGBA: Into<Box<[RGBA]>>,
+    {
         Self::new_stride(attr, pixels, width, height, width, gamma)
     }
 
@@ -52,7 +61,13 @@ impl<'pixels> Image<'pixels> {
     ///
     /// Use `0.` for gamma if the image is sRGB (most images are).
     #[inline(always)]
-    pub fn new_borrowed(attr: &Attributes, pixels: &'pixels [RGBA], width: usize, height: usize, gamma: f64) -> Result<Self, Error> {
+    pub fn new_borrowed(
+        attr: &Attributes,
+        pixels: &'pixels [RGBA],
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Self, Error> {
         Self::new_stride_borrowed(attr, pixels, width, height, width, gamma)
     }
 
@@ -67,10 +82,22 @@ impl<'pixels> Image<'pixels> {
     ///
     /// This function is marked as unsafe, because the callback function MUST initialize the entire row (call `write` on every `MaybeUninit` pixel).
     ///
-    pub unsafe fn new_fn<F: 'pixels + Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync>(attr: &Attributes, convert_row_fn: F, width: usize, height: usize, gamma: f64) -> Result<Self, Error> {
+    pub unsafe fn new_fn<F: 'pixels + Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync>(
+        attr: &Attributes,
+        convert_row_fn: F,
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Self, Error> {
         let width = width.try_into().map_err(|_| ValueOutOfRange)?;
         let height = height.try_into().map_err(|_| ValueOutOfRange)?;
-        Image::new_internal(attr, PixelsSource::Callback(Box::new(convert_row_fn)), width, height, gamma)
+        Image::new_internal(
+            attr,
+            PixelsSource::Callback(Box::new(convert_row_fn)),
+            width,
+            height,
+            gamma,
+        )
     }
 
     pub(crate) fn free_histogram_inputs(&mut self) {
@@ -108,7 +135,11 @@ impl<'pixels> Image<'pixels> {
         };
         // if image is huge or converted pixels are not likely to be reused then don't cache converted pixels
         let low_memory_hint = !attr.use_contrast_maps && attr.use_dither_map == DitherMapMode::None;
-        let limit = if low_memory_hint { LIQ_HIGH_MEMORY_LIMIT / 8 } else { LIQ_HIGH_MEMORY_LIMIT } / mem::size_of::<f_pixel>();
+        let limit = if low_memory_hint {
+            LIQ_HIGH_MEMORY_LIMIT / 8
+        } else {
+            LIQ_HIGH_MEMORY_LIMIT
+        } / mem::size_of::<f_pixel>();
         if (img.width()) * (img.height()) > limit {
             attr.verbose_print("  conserving memory"); // for simplicity of this API there's no explicit pixels argument,
         }
@@ -119,23 +150,34 @@ impl<'pixels> Image<'pixels> {
         if width == 0 || height == 0 {
             return false;
         }
-        if width.max(height) as usize > i32::MAX as usize ||
-            width as usize > isize::MAX as usize / mem::size_of::<f_pixel>() / height as usize {
+        if width.max(height) as usize > i32::MAX as usize
+            || width as usize > isize::MAX as usize / mem::size_of::<f_pixel>() / height as usize
+        {
             return false;
         }
         true
     }
 
-    pub(crate) fn update_dither_map(&mut self, remapped_image: &RowBitmap<'_, PalIndexRemap>, palette: &PalF, uses_background: bool) -> Result<(), Error> {
+    pub(crate) fn update_dither_map(
+        &mut self,
+        remapped_image: &RowBitmap<'_, PalIndexRemap>,
+        palette: &PalF,
+        uses_background: bool,
+    ) -> Result<(), Error> {
         if self.edges.is_none() {
             self.contrast_maps()?;
         }
-        let Some(mut edges) = self.edges.take() else { return Ok(()) };
+        let Some(mut edges) = self.edges.take() else {
+            return Ok(());
+        };
         let colors = palette.as_slice();
 
         let width = self.width();
         let mut prev_row: Option<&[_]> = None;
-        let mut rows = remapped_image.rows().zip(edges.chunks_exact_mut(width)).peekable();
+        let mut rows = remapped_image
+            .rows()
+            .zip(edges.chunks_exact_mut(width))
+            .peekable();
         while let Some((this_row, edges)) = rows.next() {
             let mut lastpixel = this_row[0];
             let mut lastcol = 0;
@@ -150,11 +192,15 @@ impl<'pixels> Image<'pixels> {
                     while i < col {
                         if let Some(prev_row) = prev_row {
                             let pixelabove = prev_row[i];
-                            if pixelabove == lastpixel { neighbor_count += 15; }
+                            if pixelabove == lastpixel {
+                                neighbor_count += 15;
+                            }
                         }
                         if let Some((next_row, _)) = rows.peek() {
                             let pixelbelow = next_row[i];
-                            if pixelbelow == lastpixel { neighbor_count += 15; }
+                            if pixelbelow == lastpixel {
+                                neighbor_count += 15;
+                            }
                         }
                         i += 1;
                     }
@@ -210,7 +256,9 @@ impl<'pixels> Image<'pixels> {
     ///
     /// Returns error if more than 256 colors are added. If image is quantized to fewer colors than the number of fixed colors added, then excess fixed colors will be ignored.
     pub fn add_fixed_color(&mut self, color: RGBA) -> Result<(), Error> {
-        if self.fixed_colors.len() >= MAX_COLORS { return Err(Unsupported); }
+        if self.fixed_colors.len() >= MAX_COLORS {
+            return Err(Unsupported);
+        }
         self.fixed_colors.try_reserve(1)?;
         self.fixed_colors.push_in_cap(color);
         Ok(())
@@ -232,7 +280,11 @@ impl<'pixels> Image<'pixels> {
 
     #[inline(always)]
     pub(crate) fn gamma(&self) -> Option<f64> {
-        if self.px.gamma > 0. { Some(self.px.gamma) } else { None }
+        if self.px.gamma > 0. {
+            Some(self.px.gamma)
+        } else {
+            None
+        }
     }
 
     /// Builds two maps:
@@ -245,14 +297,20 @@ impl<'pixels> Image<'pixels> {
             return Ok(()); // shrug
         }
 
-        let noise = if let Some(n) = self.importance_map.as_deref_mut() { n } else {
+        let noise = if let Some(n) = self.importance_map.as_deref_mut() {
+            n
+        } else {
             let vec = try_zero_vec(width * height)?;
-            self.importance_map.get_or_insert_with(move || vec.into_boxed_slice())
+            self.importance_map
+                .get_or_insert_with(move || vec.into_boxed_slice())
         };
 
-        let edges = if let Some(e) = self.edges.as_mut() { e } else {
+        let edges = if let Some(e) = self.edges.as_mut() {
+            e
+        } else {
             let vec = try_zero_vec(width * height)?;
-            self.edges.get_or_insert_with(move || vec.into_boxed_slice())
+            self.edges
+                .get_or_insert_with(move || vec.into_boxed_slice())
         };
 
         let mut rows_iter = self.px.all_rows_f()?.chunks_exact(width);
@@ -261,7 +319,10 @@ impl<'pixels> Image<'pixels> {
         let mut curr_row = next_row;
         let mut prev_row;
 
-        for (noise_row, edges_row) in noise[..width * height].chunks_exact_mut(width).zip(edges[..width * height].chunks_exact_mut(width)) {
+        for (noise_row, edges_row) in noise[..width * height]
+            .chunks_exact_mut(width)
+            .zip(edges[..width * height].chunks_exact_mut(width))
+        {
             prev_row = curr_row;
             curr_row = next_row;
             next_row = rows_iter.next().unwrap_or(next_row);
@@ -310,7 +371,14 @@ impl<'pixels> Image<'pixels> {
     ///
     /// Otherwise the same as [`Image::new_borrowed`].
     #[inline(always)]
-    pub fn new_stride_borrowed(attr: &Attributes, pixels: &'pixels [RGBA], width: usize, height: usize, stride: usize, gamma: f64) -> Result<Self, Error> {
+    pub fn new_stride_borrowed(
+        attr: &Attributes,
+        pixels: &'pixels [RGBA],
+        width: usize,
+        height: usize,
+        stride: usize,
+        gamma: f64,
+    ) -> Result<Self, Error> {
         Self::new_stride_internal(attr, SeaCow::borrowed(pixels), width, height, stride, gamma)
     }
 
@@ -320,11 +388,35 @@ impl<'pixels> Image<'pixels> {
     ///
     /// Otherwise the same as [`Image::new_stride_borrowed`].
     #[inline]
-    pub fn new_stride<VecRGBA>(attr: &Attributes, pixels: VecRGBA, width: usize, height: usize, stride: usize, gamma: f64) -> Result<Image<'static>, Error> where VecRGBA: Into<Box<[RGBA]>> {
-        Self::new_stride_internal(attr, SeaCow::boxed(pixels.into()), width, height, stride, gamma)
+    pub fn new_stride<VecRGBA>(
+        attr: &Attributes,
+        pixels: VecRGBA,
+        width: usize,
+        height: usize,
+        stride: usize,
+        gamma: f64,
+    ) -> Result<Image<'static>, Error>
+    where
+        VecRGBA: Into<Box<[RGBA]>>,
+    {
+        Self::new_stride_internal(
+            attr,
+            SeaCow::boxed(pixels.into()),
+            width,
+            height,
+            stride,
+            gamma,
+        )
     }
 
-    fn new_stride_internal<'a>(attr: &Attributes, pixels: SeaCow<'a, RGBA>, width: usize, height: usize, stride: usize, gamma: f64) -> Result<Image<'a>, Error> {
+    fn new_stride_internal<'a>(
+        attr: &Attributes,
+        pixels: SeaCow<'a, RGBA>,
+        width: usize,
+        height: usize,
+        stride: usize,
+        gamma: f64,
+    ) -> Result<Image<'a>, Error> {
         let width = width.try_into().map_err(|_| ValueOutOfRange)?;
         let height = height.try_into().map_err(|_| ValueOutOfRange)?;
         let stride = stride.try_into().map_err(|_| ValueOutOfRange)?;
@@ -333,9 +425,14 @@ impl<'pixels> Image<'pixels> {
         let pixels_rows = match PixelsSource::for_pixels(pixels, width, height, stride) {
             Ok(p) => p,
             Err(e) => {
-                attr.verbose_print(format!("Buffer length is {} bytes, which is not enough for {}×{}×4 RGBA bytes", pixels_len * 4, stride, height));
+                attr.verbose_print(format!(
+                    "Buffer length is {} bytes, which is not enough for {}×{}×4 RGBA bytes",
+                    pixels_len * 4,
+                    stride,
+                    height
+                ));
                 return Err(e);
-            },
+            }
         };
         Image::new_internal(attr, pixels_rows, width, height, gamma)
     }

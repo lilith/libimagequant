@@ -34,7 +34,9 @@ impl<T> SeaCow<'static, T> {
     #[inline]
     #[must_use]
     pub fn boxed(data: Box<[T]>) -> Self {
-        Self { inner: SeaCowInner::Boxed(data) }
+        Self {
+            inner: SeaCowInner::Boxed(data),
+        }
     }
 }
 
@@ -42,14 +44,20 @@ impl<'a, T> SeaCow<'a, T> {
     #[inline]
     #[must_use]
     pub const fn borrowed(data: &'a [T]) -> Self {
-        Self { inner: SeaCowInner::Borrowed(data) }
+        Self {
+            inner: SeaCowInner::Borrowed(data),
+        }
     }
 
     /// The pointer must be `malloc`-allocated
     #[inline]
     #[cfg(feature = "_internal_c_ffi")]
     #[must_use]
-    pub unsafe fn c_owned(ptr: *mut T, len: usize, free_fn: unsafe extern "C" fn(*mut c_void)) -> Self {
+    pub unsafe fn c_owned(
+        ptr: *mut T,
+        len: usize,
+        free_fn: unsafe extern "C" fn(*mut c_void),
+    ) -> Self {
         debug_assert!(!ptr.is_null());
         debug_assert!(len > 0);
 
@@ -62,7 +70,11 @@ impl<'a, T> SeaCow<'a, T> {
     #[cfg(feature = "_internal_c_ffi")]
     pub(crate) fn make_owned(&mut self, free_fn: unsafe extern "C" fn(*mut c_void)) {
         if let SeaCowInner::Borrowed(slice) = self.inner {
-            self.inner = SeaCowInner::Owned { ptr: slice.as_ptr().cast_mut(), len: slice.len(), free_fn };
+            self.inner = SeaCowInner::Owned {
+                ptr: slice.as_ptr().cast_mut(),
+                len: slice.len(),
+                free_fn,
+            };
         }
     }
 }
@@ -73,7 +85,11 @@ impl<T: Clone> Clone for SeaCowInner<'_, T> {
         let slice = match self {
             Self::Borrowed(data) => return Self::Borrowed(data),
             #[cfg(feature = "_internal_c_ffi")]
-            Self::Owned { ptr, len, free_fn: _ } => unsafe { slice::from_raw_parts(*ptr, *len) },
+            Self::Owned {
+                ptr,
+                len,
+                free_fn: _,
+            } => unsafe { slice::from_raw_parts(*ptr, *len) },
             Self::Boxed(data) => &**data,
         };
         let mut v = Vec::new();
@@ -85,7 +101,11 @@ impl<T: Clone> Clone for SeaCowInner<'_, T> {
 
 enum SeaCowInner<'a, T> {
     #[cfg(feature = "_internal_c_ffi")]
-    Owned { ptr: *mut T, len: usize, free_fn: unsafe extern "C" fn(*mut c_void) },
+    Owned {
+        ptr: *mut T,
+        len: usize,
+        free_fn: unsafe extern "C" fn(*mut c_void),
+    },
     Borrowed(&'a [T]),
     Boxed(Box<[T]>),
 }
@@ -127,11 +147,16 @@ unsafe impl<T: Send + Sync> Send for RowBitmapMut<'_, T> {}
 
 impl<T> RowBitmapMut<'_, MaybeUninit<T>> {
     #[inline]
-    pub(crate) unsafe fn assume_init<'maybeowned>(&'maybeowned mut self) -> RowBitmap<'maybeowned, T> {
+    pub(crate) unsafe fn assume_init<'maybeowned>(
+        &'maybeowned mut self,
+    ) -> RowBitmap<'maybeowned, T> {
         #[allow(clippy::transmute_ptr_to_ptr)]
         RowBitmap {
             width: self.width,
-            rows: mem::transmute::<&'maybeowned [PointerMut<MaybeUninit<T>>], &'maybeowned [Pointer<T>]>(self.rows.borrow_mut()),
+            rows: mem::transmute::<
+                &'maybeowned [PointerMut<MaybeUninit<T>>],
+                &'maybeowned [Pointer<T>],
+            >(self.rows.borrow_mut()),
         }
     }
 }
@@ -139,15 +164,16 @@ impl<T> RowBitmapMut<'_, MaybeUninit<T>> {
 impl<T> RowBitmap<'_, T> {
     pub fn rows(&self) -> impl Iterator<Item = &[T]> {
         let width = self.width;
-        self.rows.iter().map(move |row| {
-            unsafe { slice::from_raw_parts(row.0, width) }
-        })
+        self.rows
+            .iter()
+            .map(move |row| unsafe { slice::from_raw_parts(row.0, width) })
     }
 }
 
 enum MutCow<'a, T: ?Sized> {
     Owned(Box<T>),
-    #[allow(dead_code)] /// This is optional, for FFI only
+    #[allow(dead_code)]
+    /// This is optional, for FFI only
     Borrowed(&'a mut T),
 }
 
@@ -166,7 +192,11 @@ impl<'a, T: Sync + Send + Copy + 'static> RowBitmapMut<'a, T> {
     #[must_use]
     pub fn new_contiguous(data: &mut [T], width: usize) -> Self {
         Self {
-            rows: MutCow::Owned(data.chunks_exact_mut(width).map(|r| PointerMut(r.as_mut_ptr())).collect()),
+            rows: MutCow::Owned(
+                data.chunks_exact_mut(width)
+                    .map(|r| PointerMut(r.as_mut_ptr()))
+                    .collect(),
+            ),
             width,
         }
     }
@@ -184,16 +214,23 @@ impl<'a, T: Sync + Send + Copy + 'static> RowBitmapMut<'a, T> {
 
     pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut [T]> + Send {
         let width = self.width;
-        self.rows.borrow_mut().iter().map(move |row| {
-            unsafe { slice::from_raw_parts_mut(row.0, width) }
-        })
+        self.rows
+            .borrow_mut()
+            .iter()
+            .map(move |row| unsafe { slice::from_raw_parts_mut(row.0, width) })
     }
 
-    pub(crate) fn chunks(&mut self, chunk_size: usize) -> impl Iterator<Item = RowBitmapMut<'_, T>> {
-        self.rows.borrow_mut().chunks_mut(chunk_size).map(|chunk| RowBitmapMut {
-            width: self.width,
-            rows: MutCow::Borrowed(chunk),
-        })
+    pub(crate) fn chunks(
+        &mut self,
+        chunk_size: usize,
+    ) -> impl Iterator<Item = RowBitmapMut<'_, T>> {
+        self.rows
+            .borrow_mut()
+            .chunks_mut(chunk_size)
+            .map(|chunk| RowBitmapMut {
+                width: self.width,
+                rows: MutCow::Borrowed(chunk),
+            })
     }
 
     #[must_use]

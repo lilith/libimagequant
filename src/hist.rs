@@ -4,18 +4,17 @@ use crate::pal::{f_pixel, gamma_lut, PalIndex, ARGBF, MAX_COLORS, RGBA};
 use crate::quant::QuantizationResult;
 use crate::rows::{temp_buf, DynamicRows};
 use crate::Attributes;
-use core::{fmt, hash, mem};
 use core::hash::Hash;
+use core::{fmt, hash, mem};
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
-use std::{format, boxed::Box, vec::Vec};
+use std::{boxed::Box, format, vec::Vec};
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use hashbrown::{HashMap, HashSet};
 
 #[cfg(not(all(not(feature = "std"), feature = "no_std")))]
 use std::collections::{HashMap, HashSet};
-
 
 /// Number of pixels in a given color for [`Histogram::add_colors()`]
 ///
@@ -111,9 +110,18 @@ impl Histogram {
         self.gamma = image.gamma();
 
         if !image.fixed_colors.is_empty() {
-            self.fixed_colors.extend(image.fixed_colors.iter().copied().enumerate().map(|(idx, rgba)| {
-               HashColor { rgba, index: idx as _ }
-            }));
+            self.fixed_colors
+                .extend(
+                    image
+                        .fixed_colors
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(idx, rgba)| HashColor {
+                            rgba,
+                            index: idx as _,
+                        }),
+                );
         }
 
         if attr.progress(f32::from(attr.progress_stage1) * 0.40) {
@@ -122,7 +130,9 @@ impl Histogram {
 
         let posterize_bits = attr.posterize_bits();
         let surface_area = height * width;
-        let estimated_colors = (surface_area / (posterize_bits as usize + if surface_area > 512 * 512 { 7 } else { 5 })).min(250_000);
+        let estimated_colors = (surface_area
+            / (posterize_bits as usize + if surface_area > 512 * 512 { 7 } else { 5 }))
+        .min(250_000);
         self.reserve(estimated_colors);
 
         self.add_pixel_rows(&image.px, image.importance_map.as_deref(), posterize_bits)?;
@@ -171,7 +181,10 @@ impl Histogram {
         }
 
         let idx = self.fixed_colors.len();
-        self.fixed_colors.insert(HashColor { rgba, index: idx as _ });
+        self.fixed_colors.insert(HashColor {
+            rgba,
+            index: idx as _,
+        });
 
         Ok(())
     }
@@ -186,12 +199,18 @@ impl Histogram {
     }
 
     #[inline(never)]
-    pub(crate) fn quantize_internal(&mut self, attr: &Attributes, freeze_result_colors: bool) -> Result<QuantizationResult, Error> {
+    pub(crate) fn quantize_internal(
+        &mut self,
+        attr: &Attributes,
+        freeze_result_colors: bool,
+    ) -> Result<QuantizationResult, Error> {
         if self.hashmap.is_empty() && self.fixed_colors.is_empty() {
             return Err(Unsupported);
         }
 
-        if attr.progress(0.) { return Err(Aborted); }
+        if attr.progress(0.) {
+            return Err(Aborted);
+        }
         if attr.progress(f32::from(attr.progress_stage1) * 0.89) {
             return Err(Aborted);
         }
@@ -199,7 +218,10 @@ impl Histogram {
         let gamma = self.gamma.unwrap_or(0.45455);
         let hist = self.finalize_builder(gamma).map_err(|_| OutOfMemory)?;
 
-        attr.verbose_print(format!("  made histogram...{} colors found", hist.items.len()));
+        attr.verbose_print(format!(
+            "  made histogram...{} colors found",
+            hist.items.len()
+        ));
 
         QuantizationResult::new(attr, hist, freeze_result_colors, gamma)
     }
@@ -212,9 +234,12 @@ impl Histogram {
 
         let px_int = if rgba.a != 0 {
             self.posterize_mask() & unsafe { RGBAInt { rgba }.int }
-        } else { 0 };
+        } else {
+            0
+        };
 
-        self.hashmap.entry(px_int)
+        self.hashmap
+            .entry(px_int)
             // it can overflow on images over 2^24 pixels large
             .and_modify(move |e| e.0 = e.0.saturating_add(boost))
             .or_insert((boost, rgba));
@@ -240,13 +265,23 @@ impl Histogram {
         let new_posterize_mask = self.posterize_mask();
 
         let new_size = (self.hashmap.len() / 3).max(self.hashmap.capacity() / 5);
-        let old_hashmap = mem::replace(&mut self.hashmap, HashMap::with_capacity_and_hasher(new_size, U32Hasher(0)));
-        self.hashmap.extend(old_hashmap.into_iter().map(move |(k, v)| {
-            (k & new_posterize_mask, v)
-        }));
+        let old_hashmap = mem::replace(
+            &mut self.hashmap,
+            HashMap::with_capacity_and_hasher(new_size, U32Hasher(0)),
+        );
+        self.hashmap.extend(
+            old_hashmap
+                .into_iter()
+                .map(move |(k, v)| (k & new_posterize_mask, v)),
+        );
     }
 
-    pub(crate) fn add_pixel_rows(&mut self, image: &DynamicRows<'_, '_>, importance_map: Option<&[u8]>, posterize_bits: u8) -> Result<(), Error> {
+    pub(crate) fn add_pixel_rows(
+        &mut self,
+        image: &DynamicRows<'_, '_>,
+        importance_map: Option<&[u8]>,
+        posterize_bits: u8,
+    ) -> Result<(), Error> {
         let width = image.width as usize;
         let height = image.height as usize;
 
@@ -258,7 +293,10 @@ impl Histogram {
         let mut temp_row = temp_buf(width)?;
         for row in 0..height {
             let pixels_row = &image_iter.row_rgba(&mut temp_row, row)[..width];
-            let importance_map = importance_map.next().map(move |m| &m[..width]).unwrap_or(&[]);
+            let importance_map = importance_map
+                .next()
+                .map(move |m| &m[..width])
+                .unwrap_or(&[]);
             for (col, px) in pixels_row.iter().copied().enumerate() {
                 let boost = importance_map.get(col).copied().unwrap_or(255);
                 self.add_color(px, boost.into());
@@ -280,7 +318,9 @@ impl Histogram {
         for &HashColor { rgba, .. } in &self.fixed_colors {
             let px_int = if rgba.a != 0 {
                 unsafe { RGBAInt { rgba }.int }
-            } else { 0 };
+            } else {
+                0
+            };
 
             self.hashmap.insert(px_int, (0, rgba));
         }
@@ -290,12 +330,19 @@ impl Histogram {
 
         let mut counts = [0; LIQ_MAXCLUSTER];
         temp.extend(self.hashmap.values().map(|&(boost, color)| {
-            let cluster_index = ((color.r >> 7) << 3) | ((color.g >> 7) << 2) | ((color.b >> 7) << 1) | (color.a >> 7);
+            let cluster_index = ((color.r >> 7) << 3)
+                | ((color.g >> 7) << 2)
+                | ((color.b >> 7) << 1)
+                | (color.a >> 7);
             counts[cluster_index as usize] += 1;
 
             // fixed colors result in weight == 0.
             let weight = boost as f32;
-            TempHistItem { color, weight, cluster_index }
+            TempHistItem {
+                color,
+                weight,
+                cluster_index,
+            }
         }));
 
         let mut clusters = [Cluster { begin: 0, end: 0 }; LIQ_MAXCLUSTER];
@@ -308,18 +355,31 @@ impl Histogram {
 
         let mut items = Vec::new();
         items.try_reserve_exact(temp.len())?;
-        items.resize(temp.len(), HistItem {
-            color: if cfg!(debug_assertions) { f_pixel( ARGBF { r:f32::NAN, g:f32::NAN, b:f32::NAN, a:f32::NAN } ) } else { f_pixel::default() },
-            adjusted_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
-            perceptual_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
-            mc_color_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
-            tmp: if cfg!(debug_assertions) { !0 } else { 0 },
-        });
+        items.resize(
+            temp.len(),
+            HistItem {
+                color: if cfg!(debug_assertions) {
+                    f_pixel(ARGBF {
+                        r: f32::NAN,
+                        g: f32::NAN,
+                        b: f32::NAN,
+                        a: f32::NAN,
+                    })
+                } else {
+                    f_pixel::default()
+                },
+                adjusted_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
+                perceptual_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
+                mc_color_weight: if cfg!(debug_assertions) { f32::NAN } else { 0. },
+                tmp: if cfg!(debug_assertions) { !0 } else { 0 },
+            },
+        );
         let mut items = items.into_boxed_slice();
 
         // Limit perceptual weight to 1/10th of the image surface area to prevent
         // a single color from dominating all others.
-        let max_perceptual_weight = ((0.1 / 255.) * temp.iter().map(|t| f64::from(t.weight)).sum::<f64>()) as f32;
+        let max_perceptual_weight =
+            ((0.1 / 255.) * temp.iter().map(|t| f64::from(t.weight)).sum::<f64>()) as f32;
 
         let lut = gamma_lut(gamma);
         let mut total_perceptual_weight = 0.;
@@ -343,9 +403,17 @@ impl Histogram {
 
         let mut fixed_colors: Vec<_> = self.fixed_colors.iter().collect();
         fixed_colors.sort_by_key(|c| c.index); // original order
-        let fixed_colors = fixed_colors.iter().map(|c| f_pixel::from_rgba(&lut, c.rgba)).collect();
+        let fixed_colors = fixed_colors
+            .iter()
+            .map(|c| f_pixel::from_rgba(&lut, c.rgba))
+            .collect();
 
-        Ok(HistogramInternal { items, total_perceptual_weight, clusters, fixed_colors })
+        Ok(HistogramInternal {
+            items,
+            total_perceptual_weight,
+            clusters,
+            fixed_colors,
+        })
     }
 }
 
@@ -393,22 +461,50 @@ pub(crate) struct U32Hasher(pub u32);
 impl hash::Hasher for U32Hasher {
     // magic constant from fxhash. For a single 32-bit key that's all it needs!
     #[inline(always)]
-    fn finish(&self) -> u64 { u64::from(self.0).wrapping_mul(0x517cc1b727220a95) }
+    fn finish(&self) -> u64 {
+        u64::from(self.0).wrapping_mul(0x517cc1b727220a95)
+    }
     #[inline(always)]
-    fn write_u32(&mut self, i: u32) { self.0 = i; }
+    fn write_u32(&mut self, i: u32) {
+        self.0 = i;
+    }
 
-    fn write(&mut self, _bytes: &[u8]) { unimplemented!() }
-    fn write_u8(&mut self, _i: u8) { unimplemented!() }
-    fn write_u16(&mut self, _i: u16) { unimplemented!() }
-    fn write_u64(&mut self, _i: u64) { unimplemented!() }
-    fn write_u128(&mut self, _i: u128) { unimplemented!() }
-    fn write_usize(&mut self, _i: usize) { unimplemented!() }
-    fn write_i8(&mut self, _i: i8) { unimplemented!() }
-    fn write_i16(&mut self, _i: i16) { unimplemented!() }
-    fn write_i32(&mut self, _i: i32) { unimplemented!() }
-    fn write_i64(&mut self, _i: i64) { unimplemented!() }
-    fn write_i128(&mut self, _i: i128) { unimplemented!() }
-    fn write_isize(&mut self, _i: isize) { unimplemented!() }
+    fn write(&mut self, _bytes: &[u8]) {
+        unimplemented!()
+    }
+    fn write_u8(&mut self, _i: u8) {
+        unimplemented!()
+    }
+    fn write_u16(&mut self, _i: u16) {
+        unimplemented!()
+    }
+    fn write_u64(&mut self, _i: u64) {
+        unimplemented!()
+    }
+    fn write_u128(&mut self, _i: u128) {
+        unimplemented!()
+    }
+    fn write_usize(&mut self, _i: usize) {
+        unimplemented!()
+    }
+    fn write_i8(&mut self, _i: i8) {
+        unimplemented!()
+    }
+    fn write_i16(&mut self, _i: i16) {
+        unimplemented!()
+    }
+    fn write_i32(&mut self, _i: i32) {
+        unimplemented!()
+    }
+    fn write_i64(&mut self, _i: i64) {
+        unimplemented!()
+    }
+    fn write_i128(&mut self, _i: i128) {
+        unimplemented!()
+    }
+    fn write_isize(&mut self, _i: isize) {
+        unimplemented!()
+    }
 }
 
 /// ignores the index

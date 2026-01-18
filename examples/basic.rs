@@ -4,7 +4,15 @@ fn main() {
     // Image loading/saving is outside scope of this library
     let width = 10;
     let height = 10;
-    let fakebitmap = vec![imagequant::RGBA {r:100, g:200, b:250, a:255}; width * height];
+    let fakebitmap = vec![
+        imagequant::RGBA {
+            r: 100,
+            g: 200,
+            b: 250,
+            a: 255
+        };
+        width * height
+    ];
 
     // Configure the library
     let mut liq = imagequant::new();

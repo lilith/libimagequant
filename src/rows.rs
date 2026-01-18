@@ -21,7 +21,12 @@ pub(crate) enum PixelsSource<'pixels, 'rows> {
 }
 
 impl<'pixels> PixelsSource<'pixels, '_> {
-    pub(crate) fn for_pixels(pixels: SeaCow<'pixels, RGBA>, width: u32, height: u32, stride: u32) -> Result<Self, Error> {
+    pub(crate) fn for_pixels(
+        pixels: SeaCow<'pixels, RGBA>,
+        width: u32,
+        height: u32,
+        stride: u32,
+    ) -> Result<Self, Error> {
         if stride < width || height == 0 || width == 0 {
             return Err(Error::ValueOutOfRange);
         }
@@ -30,13 +35,26 @@ impl<'pixels> PixelsSource<'pixels, '_> {
         let height = height as usize;
 
         let slice = pixels.as_slice();
-        let min_area = stride.checked_mul(height).and_then(|a| a.checked_add(width)).ok_or(Error::ValueOutOfRange)? - stride;
+        let min_area = stride
+            .checked_mul(height)
+            .and_then(|a| a.checked_add(width))
+            .ok_or(Error::ValueOutOfRange)?
+            - stride;
         if slice.len() < min_area {
             return Err(Error::BufferTooSmall);
         }
 
-        let rows = SeaCow::boxed(slice.chunks(stride).map(|row| Pointer(row.as_ptr())).take(height).collect());
-        Ok(Self::Pixels { rows, pixels: Some(pixels) })
+        let rows = SeaCow::boxed(
+            slice
+                .chunks(stride)
+                .map(|row| Pointer(row.as_ptr()))
+                .take(height)
+                .collect(),
+        );
+        Ok(Self::Pixels {
+            rows,
+            pixels: Some(pixels),
+        })
     }
 }
 
@@ -62,7 +80,8 @@ impl Clone for DynamicRows<'_, '_> {
                 PixelsSource::Callback(_) => {
                     let area = self.width as usize * self.height as usize;
                     let mut out = Vec::with_capacity(area);
-                    let out_rows = out.spare_capacity_mut()[..area].chunks_exact_mut(self.width as usize);
+                    let out_rows =
+                        out.spare_capacity_mut()[..area].chunks_exact_mut(self.width as usize);
                     for (i, row) in out_rows.enumerate() {
                         self.row_rgba(row, i);
                     }
@@ -71,7 +90,7 @@ impl Clone for DynamicRows<'_, '_> {
                     }
                     let pixels = SeaCow::boxed(out.into_boxed_slice());
                     PixelsSource::for_pixels(pixels, self.width, self.height, self.width).unwrap()
-                },
+                }
             },
             gamma: self.gamma,
         }
@@ -85,7 +104,11 @@ pub(crate) struct DynamicRowsIter<'parent, 'pixels, 'rows> {
 
 impl DynamicRowsIter<'_, '_, '_> {
     #[must_use]
-    pub fn row_f<'px>(&'px mut self, temp_row: &mut [MaybeUninit<RGBA>], row: usize) -> &'px [f_pixel] {
+    pub fn row_f<'px>(
+        &'px mut self,
+        temp_row: &mut [MaybeUninit<RGBA>],
+        row: usize,
+    ) -> &'px [f_pixel] {
         debug_assert_eq!(temp_row.len(), self.px.width as usize);
         if let Some(pixels) = self.px.f_pixels.as_ref() {
             let start = self.px.width as usize * row;
@@ -102,7 +125,12 @@ impl DynamicRowsIter<'_, '_, '_> {
     }
 
     #[must_use]
-    pub fn row_f_shared<'px>(&'px self, temp_row: &mut [MaybeUninit<RGBA>], temp_row_f: &'px mut [MaybeUninit<f_pixel>], row: usize) -> &'px [f_pixel] {
+    pub fn row_f_shared<'px>(
+        &'px self,
+        temp_row: &mut [MaybeUninit<RGBA>],
+        temp_row_f: &'px mut [MaybeUninit<f_pixel>],
+        row: usize,
+    ) -> &'px [f_pixel] {
         if let Some(pixels) = self.px.f_pixels.as_ref() {
             &pixels[self.px.width as usize * row..]
         } else {
@@ -114,16 +142,31 @@ impl DynamicRowsIter<'_, '_, '_> {
     }
 
     #[must_use]
-    pub fn row_rgba<'px>(&'px self, temp_row: &'px mut [MaybeUninit<RGBA>], row: usize) -> &'px [RGBA] {
+    pub fn row_rgba<'px>(
+        &'px self,
+        temp_row: &'px mut [MaybeUninit<RGBA>],
+        row: usize,
+    ) -> &'px [RGBA] {
         self.px.row_rgba(temp_row, row)
     }
 }
 
 impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     #[inline]
-    pub(crate) fn new(width: u32, height: u32, pixels: PixelsSource<'pixels, 'rows>, gamma: f64) -> Self {
+    pub(crate) fn new(
+        width: u32,
+        height: u32,
+        pixels: PixelsSource<'pixels, 'rows>,
+        gamma: f64,
+    ) -> Self {
         debug_assert!(gamma > 0.);
-        Self { width, height, f_pixels: None, pixels, gamma }
+        Self {
+            width,
+            height,
+            f_pixels: None,
+            pixels,
+            gamma,
+        }
     }
 
     fn row_rgba<'px>(&'px self, temp_row: &'px mut [MaybeUninit<RGBA>], row: usize) -> &'px [RGBA] {
@@ -135,11 +178,15 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
                 cb(temp_row, row);
                 // cb needs to be marked as unsafe, since it's responsible for initialization :(
                 unsafe { slice_assume_init_mut(temp_row) }
-            },
+            }
         }
     }
 
-    fn convert_row_to_f<'f>(row_f_pixels: &'f mut [MaybeUninit<f_pixel>], row_pixels: &[RGBA], gamma_lut: &[f32; 256]) -> &'f mut [f_pixel] {
+    fn convert_row_to_f<'f>(
+        row_f_pixels: &'f mut [MaybeUninit<f_pixel>],
+        row_pixels: &[RGBA],
+        gamma_lut: &[f32; 256],
+    ) -> &'f mut [f_pixel] {
         assert_eq!(row_f_pixels.len(), row_pixels.len());
         for (dst, src) in row_f_pixels.iter_mut().zip(row_pixels) {
             dst.write(f_pixel::from_rgba(gamma_lut, *src));
@@ -161,7 +208,11 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         Ok(Some(temp_buf(self.width())?))
     }
 
-    pub fn prepare_iter(&mut self, temp_row: &mut [MaybeUninit<RGBA>], allow_steamed: bool) -> Result<(), Error> {
+    pub fn prepare_iter(
+        &mut self,
+        temp_row: &mut [MaybeUninit<RGBA>],
+        allow_steamed: bool,
+    ) -> Result<(), Error> {
         debug_assert_eq!(temp_row.len(), self.width as _);
 
         if self.f_pixels.is_some() || (allow_steamed && self.should_use_low_memory()) {
@@ -181,7 +232,10 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 
     #[inline]
-    pub fn rows_iter(&mut self, temp_row: &mut [MaybeUninit<RGBA>]) -> Result<DynamicRowsIter<'_, 'pixels, 'rows>, Error> {
+    pub fn rows_iter(
+        &mut self,
+        temp_row: &mut [MaybeUninit<RGBA>],
+    ) -> Result<DynamicRowsIter<'_, 'pixels, 'rows>, Error> {
         self.prepare_iter(temp_row, true)?;
         Ok(DynamicRowsIter {
             temp_f_row: self.temp_f_row_for_iter()?,
@@ -206,7 +260,10 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
                 return Err(Error::Unsupported);
             }
         }
-        Ok(DynamicRowsIter { px: self, temp_f_row: None })
+        Ok(DynamicRowsIter {
+            px: self,
+            temp_f_row: None,
+        })
     }
 
     #[inline]
@@ -220,7 +277,12 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
 
     /// Not recommended
     #[cfg(feature = "_internal_c_ffi")]
-    pub(crate) unsafe fn set_memory_ownership(&mut self, own_rows: bool, own_pixels: bool, free_fn: unsafe extern "C" fn(*mut core::ffi::c_void)) -> Result<(), Error> {
+    pub(crate) unsafe fn set_memory_ownership(
+        &mut self,
+        own_rows: bool,
+        own_pixels: bool,
+        free_fn: unsafe extern "C" fn(*mut core::ffi::c_void),
+    ) -> Result<(), Error> {
         if own_rows {
             match &mut self.pixels {
                 PixelsSource::Pixels { rows, .. } => rows.make_owned(free_fn),
@@ -231,12 +293,20 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         if own_pixels {
             let len = self.width() * self.height();
             match &mut self.pixels {
-                PixelsSource::Pixels { pixels: Some(pixels), .. } => pixels.make_owned(free_fn),
+                PixelsSource::Pixels {
+                    pixels: Some(pixels),
+                    ..
+                } => pixels.make_owned(free_fn),
                 PixelsSource::Pixels { pixels, rows } => {
                     // the row with the lowest address is assumed to be at the start of the bitmap
-                    let ptr = rows.as_slice().iter().map(|p| p.0).min().ok_or(Error::Unsupported)?;
+                    let ptr = rows
+                        .as_slice()
+                        .iter()
+                        .map(|p| p.0)
+                        .min()
+                        .ok_or(Error::Unsupported)?;
                     *pixels = Some(SeaCow::c_owned(ptr.cast_mut(), len, free_fn));
-                },
+                }
                 PixelsSource::Callback(_) => return Err(Error::ValueOutOfRange),
             }
         }

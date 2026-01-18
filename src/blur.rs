@@ -34,7 +34,13 @@ pub(crate) fn liq_max3(src: &[u8], dst: &mut [u8], width: usize, height: usize) 
     liq_op3(src, dst, width, height, |a, b| a.max(b));
 }
 
-pub(crate) fn liq_op3(src: &[u8], dst: &mut [u8], width: usize, height: usize, op: impl Fn(u8, u8) -> u8) {
+pub(crate) fn liq_op3(
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    height: usize,
+    op: impl Fn(u8, u8) -> u8,
+) {
     for j in 0..height {
         let row = &src[j * width..][..width];
         let dst = &mut dst[j * width..][..width];

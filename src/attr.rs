@@ -11,7 +11,12 @@ use crate::no_std_compat::*;
 
 /// Starting point and settings for the quantization process
 #[derive(Clone)]
-#[cfg_attr(all(feature = "std", feature = "no_std"), deprecated(note = "Cargo features configuration issue: both std and no_std features are enabled in imagequant\nYou must disable default features to use no_std."))]
+#[cfg_attr(
+    all(feature = "std", feature = "no_std"),
+    deprecated(
+        note = "Cargo features configuration issue: both std and no_std features are enabled in imagequant\nYou must disable default features to use no_std."
+    )
+)]
 pub struct Attributes {
     pub(crate) max_colors: PalLen,
     target_mse: f64,
@@ -76,7 +81,16 @@ impl Attributes {
     ///
     /// Use 0.0 for gamma if the image is sRGB (most images are).
     #[inline]
-    pub fn new_image<VecRGBA>(&self, pixels: VecRGBA, width: usize, height: usize, gamma: f64) -> Result<Image<'static>, Error> where VecRGBA: Into<Box<[RGBA]>> {
+    pub fn new_image<VecRGBA>(
+        &self,
+        pixels: VecRGBA,
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Image<'static>, Error>
+    where
+        VecRGBA: Into<Box<[RGBA]>>,
+    {
         Image::new(self, pixels, width, height, gamma)
     }
 
@@ -135,7 +149,11 @@ impl Attributes {
         self.feedback_loop_trials = (56 - 9 * value).max(0) as _;
         self.max_histogram_entries = ((1 << 17) + (1 << 18) * (10 - value)) as _;
         self.min_posterization_input = if value >= 8 { 1 } else { 0 };
-        self.use_dither_map = if value <= 6 { DitherMapMode::Enabled } else { DitherMapMode::None };
+        self.use_dither_map = if value <= 6 {
+            DitherMapMode::Enabled
+        } else {
+            DitherMapMode::None
+        };
         if self.use_dither_map != DitherMapMode::None && value < 3 {
             self.use_dither_map = DitherMapMode::Always;
         }
@@ -197,7 +215,13 @@ impl Attributes {
     ///
     /// Use 0.0 for gamma if the image is sRGB (most images are).
     #[inline]
-    pub fn new_image_borrowed<'pixels>(&self, bitmap: &'pixels [RGBA], width: usize, height: usize, gamma: f64) -> Result<Image<'pixels>, Error> {
+    pub fn new_image_borrowed<'pixels>(
+        &self,
+        bitmap: &'pixels [RGBA],
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Image<'pixels>, Error> {
         Image::new_borrowed(self, bitmap, width, height, gamma)
     }
 
@@ -205,14 +229,31 @@ impl Attributes {
     ///
     /// The `pixels` argument can be `Vec<RGBA>`, or `Box<[RGBA]>` or `&[RGBA]`.
     #[inline]
-    pub fn new_image_stride<VecRGBA>(&self, pixels: VecRGBA, width: usize, height: usize, stride: usize, gamma: f64) -> Result<Image<'static>, Error> where VecRGBA: Into<Box<[RGBA]>> {
+    pub fn new_image_stride<VecRGBA>(
+        &self,
+        pixels: VecRGBA,
+        width: usize,
+        height: usize,
+        stride: usize,
+        gamma: f64,
+    ) -> Result<Image<'static>, Error>
+    where
+        VecRGBA: Into<Box<[RGBA]>>,
+    {
         Image::new_stride(self, pixels, width, height, stride, gamma)
     }
 
     #[doc(hidden)]
     #[deprecated(note = "use new_image_stride")]
     #[cold]
-    pub fn new_image_stride_copy(&self, bitmap: &[RGBA], width: usize, height: usize, stride: usize, gamma: f64) -> Result<Image<'static>, Error> {
+    pub fn new_image_stride_copy(
+        &self,
+        bitmap: &[RGBA],
+        width: usize,
+        height: usize,
+        stride: usize,
+        gamma: f64,
+    ) -> Result<Image<'static>, Error> {
         self.new_image_stride(bitmap, width, height, stride, gamma)
     }
 
@@ -237,7 +278,10 @@ impl Attributes {
     ///
     /// To share data with the callback, use `Arc` or `Atomic*` types and `move ||` closures.
     #[inline]
-    pub fn set_progress_callback<F: Fn(f32) -> ControlFlow + Send + Sync + 'static>(&mut self, callback: F) {
+    pub fn set_progress_callback<F: Fn(f32) -> ControlFlow + Send + Sync + 'static>(
+        &mut self,
+        callback: F,
+    ) {
         self.progress_callback = Some(Arc::new(callback));
     }
 
@@ -297,9 +341,17 @@ impl Attributes {
 
     /// `max_mse`, `target_mse`, user asked for perfect quality
     pub(crate) fn target_mse(&self, hist_items_len: usize) -> (Option<f64>, f64, bool) {
-        let max_mse = self.max_mse.map(|mse| mse * if hist_items_len <= MAX_COLORS { 0.33 } else { 1. });
+        let max_mse = self.max_mse.map(|mse| {
+            mse * if hist_items_len <= MAX_COLORS {
+                0.33
+            } else {
+                1.
+            }
+        });
         let aim_for_perfect_quality = self.target_mse == 0.;
-        let mut target_mse = self.target_mse.max((f64::from(1 << self.min_posterization_output) / 1024.).powi(2));
+        let mut target_mse = self
+            .target_mse
+            .max((f64::from(1 << self.min_posterization_output) / 1024.).powi(2));
         if let Some(max_mse) = max_mse {
             target_mse = target_mse.min(max_mse);
         }
@@ -308,7 +360,11 @@ impl Attributes {
 
     /// returns iterations, `iteration_limit`
     #[must_use]
-    pub(crate) fn kmeans_iterations(&self, hist_items_len: usize, palette_error_is_known: bool) -> (u16, f64) {
+    pub(crate) fn kmeans_iterations(
+        &self,
+        hist_items_len: usize,
+        palette_error_is_known: bool,
+    ) -> (u16, f64) {
         let mut iteration_limit = self.kmeans_iteration_limit;
         let mut iterations = self.kmeans_iterations;
         if hist_items_len > 5000 {
@@ -333,7 +389,8 @@ impl Attributes {
     #[inline]
     #[must_use]
     pub(crate) fn posterize_bits(&self) -> u8 {
-        self.min_posterization_output.max(self.min_posterization_input)
+        self.min_posterization_output
+            .max(self.min_posterization_input)
     }
 }
 

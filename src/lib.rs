@@ -4,7 +4,6 @@
 //!
 //! See `examples/` directory for example code.
 #![cfg_attr(all(not(feature = "std"), feature = "no_std"), no_std)]
-
 #![doc(html_logo_url = "https://pngquant.org/pngquant-logo.png")]
 #![deny(missing_docs)]
 #![allow(clippy::bool_to_int_with_if)]
@@ -46,7 +45,11 @@ mod rayoff;
 
 #[cfg(feature = "threads")]
 mod rayoff {
-    pub(crate) fn num_cpus() -> usize { std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1) }
+    pub(crate) fn num_cpus() -> usize {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    }
     pub(crate) use rayon::in_place_scope as scope;
     pub(crate) use rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSliceMut};
     pub(crate) use thread_local::ThreadLocal;
@@ -96,7 +99,15 @@ fn copy_img() {
 fn takes_rgba() {
     let liq = Attributes::new();
 
-    let img = vec![RGBA { r: 0, g: 0, b: 0, a: 0 }; 8];
+    let img = vec![
+        RGBA {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0
+        };
+        8
+    ];
 
     liq.new_image_borrowed(&img, 1, 1, 0.0).unwrap();
     liq.new_image_borrowed(&img, 4, 2, 0.0).unwrap();
@@ -110,18 +121,32 @@ fn histogram() {
     let attr = Attributes::new();
     let mut hist = Histogram::new(&attr);
 
-    let bitmap1 = [RGBA { r: 0, g: 0, b: 0, a: 0 }; 1];
+    let bitmap1 = [RGBA {
+        r: 0,
+        g: 0,
+        b: 0,
+        a: 0,
+    }; 1];
     let mut image1 = attr.new_image(&bitmap1[..], 1, 1, 0.0).unwrap();
     hist.add_image(&attr, &mut image1).unwrap();
 
-    let bitmap2 = [RGBA { r: 255, g: 255, b: 255, a: 255 }; 1];
+    let bitmap2 = [RGBA {
+        r: 255,
+        g: 255,
+        b: 255,
+        a: 255,
+    }; 1];
     let mut image2 = attr.new_image(&bitmap2[..], 1, 1, 0.0).unwrap();
     hist.add_image(&attr, &mut image2).unwrap();
 
-    hist.add_colors(&[HistogramEntry {
-        color: RGBA::new(255, 128, 255, 128),
-        count: 10,
-    }], 0.0).unwrap();
+    hist.add_colors(
+        &[HistogramEntry {
+            color: RGBA::new(255, 128, 255, 128),
+            count: 10,
+        }],
+        0.0,
+    )
+    .unwrap();
 
     let mut res = hist.quantize(&attr).unwrap();
     let pal = res.palette();
@@ -180,8 +205,24 @@ fn poke_it() {
 
     assert_eq!(width * height, pixels.len());
     assert_eq!(100, res.quantization_quality().unwrap());
-    assert_eq!(RGBA { r: 255, g: 255, b: 255, a: 255 }, palette[0]);
-    assert_eq!(RGBA { r: 0x55, g: 0x66, b: 0x77, a: 255 }, palette[1]);
+    assert_eq!(
+        RGBA {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255
+        },
+        palette[0]
+    );
+    assert_eq!(
+        RGBA {
+            r: 0x55,
+            g: 0x66,
+            b: 0x77,
+            a: 255
+        },
+        palette[1]
+    );
 
     assert!(log_called.load(SeqCst));
     assert!(prog_called.load(SeqCst));
@@ -206,7 +247,9 @@ fn thread() {
     std::thread::spawn(move || {
         let b = vec![RGBA::new(0, 0, 0, 0); 1];
         liq.new_image_borrowed(&b, 1, 1, 0.).unwrap();
-    }).join().unwrap();
+    })
+    .join()
+    .unwrap();
 }
 
 #[test]
@@ -229,9 +272,7 @@ fn r_callback_test() {
             }
             called2.fetch_add(1, SeqCst);
         };
-        let mut img = unsafe {
-            Image::new_fn(&a, get_row, 123, 5, 0.).unwrap()
-        };
+        let mut img = unsafe { Image::new_fn(&a, get_row, 123, 5, 0.).unwrap() };
         a.quantize(&mut img).unwrap()
     };
     let called = called.load(SeqCst);
@@ -243,8 +284,16 @@ fn r_callback_test() {
 fn sizes() {
     use core::mem::size_of;
     use pal::{PalF, Palette};
-    assert!(size_of::<PalF>() < crate::pal::MAX_COLORS * (8 * 4) + 32, "{}", size_of::<PalF>());
-    assert!(size_of::<QuantizationResult>() < size_of::<PalF>() + size_of::<Palette>() + 100, "{}", size_of::<QuantizationResult>());
+    assert!(
+        size_of::<PalF>() < crate::pal::MAX_COLORS * (8 * 4) + 32,
+        "{}",
+        size_of::<PalF>()
+    );
+    assert!(
+        size_of::<QuantizationResult>() < size_of::<PalF>() + size_of::<Palette>() + 100,
+        "{}",
+        size_of::<QuantizationResult>()
+    );
     assert!(size_of::<Attributes>() < 200);
     assert!(size_of::<Image>() < 300);
     assert!(size_of::<Histogram>() < 200);
@@ -258,10 +307,17 @@ pub fn _unstable_internal_kmeans_bench() -> impl FnMut() {
     let attr = new();
     let mut h = hist::Histogram::new(&attr);
 
-    let e = (0..10000u32).map(|i| HistogramEntry {
-        count: i.wrapping_mul(17) % 12345,
-        color: RGBA::new(i as u8, (i.wrapping_mul(7) >> 2) as u8, (i.wrapping_mul(11) >> 11) as u8, 255),
-    }).collect::<Vec<_>>();
+    let e = (0..10000u32)
+        .map(|i| HistogramEntry {
+            count: i.wrapping_mul(17) % 12345,
+            color: RGBA::new(
+                i as u8,
+                (i.wrapping_mul(7) >> 2) as u8,
+                (i.wrapping_mul(11) >> 11) as u8,
+                255,
+            ),
+        })
+        .collect::<Vec<_>>();
 
     h.add_colors(&e, 0.).unwrap();
     let mut hist = h.finalize_builder(0.45455).unwrap();
@@ -269,7 +325,10 @@ pub fn _unstable_internal_kmeans_bench() -> impl FnMut() {
     let lut = pal::gamma_lut(0.45455);
     let mut p = PalF::new();
     for i in 0..=255 {
-        p.push(pal::f_pixel::from_rgba(&lut, RGBA::new(i | 7, i, i, 255)), PalPop::new(1.));
+        p.push(
+            pal::f_pixel::from_rgba(&lut, RGBA::new(i | 7, i, i, 255)),
+            PalPop::new(1.),
+        );
     }
 
     move || {
@@ -298,8 +357,7 @@ impl<T> PushInCapacity<T> for Vec<T> {
 #[repr(transparent)]
 struct OrdFloat<T>(pub(crate) T);
 
-impl Eq for OrdFloat<f32> {
-}
+impl Eq for OrdFloat<f32> {}
 
 impl Ord for OrdFloat<f32> {
     #[inline]
@@ -308,8 +366,7 @@ impl Ord for OrdFloat<f32> {
     }
 }
 
-impl Eq for OrdFloat<f64> {
-}
+impl Eq for OrdFloat<f64> {}
 
 impl Ord for OrdFloat<f64> {
     #[inline]
@@ -338,10 +395,12 @@ impl OrdFloat<f64> {
 fn test_fixed_colors() {
     let attr = Attributes::new();
     let mut h = Histogram::new(&attr);
-    let tmp = (0..128).map(|c| HistogramEntry {
-        color: RGBA::new(c,c,c,255),
-        count: 1,
-    }).collect::<Vec<_>>();
+    let tmp = (0..128)
+        .map(|c| HistogramEntry {
+            color: RGBA::new(c, c, c, 255),
+            count: 1,
+        })
+        .collect::<Vec<_>>();
     h.add_colors(&tmp, 0.).unwrap();
     for f in 200..255 {
         h.add_fixed_color(RGBA::new(f, f, f, 255), 0.).unwrap();
@@ -361,8 +420,8 @@ fn test_fixed_colors() {
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 pub(crate) mod no_std_compat {
     pub use std::boxed::Box;
-    pub use std::vec::Vec;
     pub use std::format;
+    pub use std::vec::Vec;
 
     extern "C" {
         fn pow(_: f64, _: f64) -> f64;

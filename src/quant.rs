@@ -4,8 +4,8 @@ use crate::hist::{Histogram, HistogramInternal};
 use crate::image::Image;
 use crate::kmeans::Kmeans;
 use crate::mediancut::mediancut;
-use crate::pal::{PalF, PalIndexRemap, PalLen, PalPop, Palette, MAX_COLORS, RGBA};
 use crate::pal::{internal_mse_to_standard_mse, unit_mse_to_internal_mse};
+use crate::pal::{PalF, PalIndexRemap, PalLen, PalPop, Palette, MAX_COLORS, RGBA};
 use crate::remap::{remap_to_palette, remap_to_palette_floyd, DitherMapMode, Remapped};
 use crate::seacow::RowBitmapMut;
 use crate::OrdFloat;
@@ -32,14 +32,25 @@ pub struct QuantizationResult {
 }
 
 impl QuantizationResult {
-    pub(crate) fn new(attr: &Attributes, hist: HistogramInternal, freeze_result_colors: bool, gamma: f64) -> Result<Self, Error> {
-        if attr.progress(f32::from(attr.progress_stage1)) { return Err(Aborted); }
+    pub(crate) fn new(
+        attr: &Attributes,
+        hist: HistogramInternal,
+        freeze_result_colors: bool,
+        gamma: f64,
+    ) -> Result<Self, Error> {
+        if attr.progress(f32::from(attr.progress_stage1)) {
+            return Err(Aborted);
+        }
         let (max_mse, target_mse, target_mse_is_zero) = attr.target_mse(hist.items.len());
-        let (mut palette, palette_error) = find_best_palette(attr, target_mse, target_mse_is_zero, max_mse, hist)?;
+        let (mut palette, palette_error) =
+            find_best_palette(attr, target_mse, target_mse_is_zero, max_mse, hist)?;
         if freeze_result_colors {
             palette.iter_mut().for_each(|(_, p)| *p = p.to_fixed());
         }
-        if attr.progress(f32::from(attr.progress_stage3).mul_add(0.95, f32::from(attr.progress_stage1) + f32::from(attr.progress_stage2))) {
+        if attr.progress(f32::from(attr.progress_stage3).mul_add(
+            0.95,
+            f32::from(attr.progress_stage1) + f32::from(attr.progress_stage2),
+        )) {
             return Err(Aborted);
         }
         if let (Some(palette_error), Some(max_mse)) = (palette_error, max_mse) {
@@ -77,15 +88,33 @@ impl QuantizationResult {
     /// This is 100% redundant and unnecessary. This work is done anyway when remap is called.
     /// However, this can be called before calling `image.set_background()`, so it may allow better parallelization while the background is generated on another thread.
     #[doc(hidden)]
-    pub fn optionally_prepare_for_dithering_with_background_set(&mut self, image: &mut Image<'_>, output_buf: &mut [MaybeUninit<PalIndexRemap>]) -> Result<(), Error> {
+    pub fn optionally_prepare_for_dithering_with_background_set(
+        &mut self,
+        image: &mut Image<'_>,
+        output_buf: &mut [MaybeUninit<PalIndexRemap>],
+    ) -> Result<(), Error> {
         let mut output_pixels = RowBitmapMut::new_contiguous(output_buf, image.width());
-        Self::optionally_generate_dither_map(self.use_dither_map, image, true, &mut output_pixels, &mut self.palette)?;
+        Self::optionally_generate_dither_map(
+            self.use_dither_map,
+            image,
+            true,
+            &mut output_pixels,
+            &mut self.palette,
+        )?;
         Ok(())
     }
 
     #[inline(never)]
-    pub(crate) fn write_remapped_image_rows_internal(&mut self, image: &mut Image, mut output_pixels: RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>) -> Result<(), Error> {
-        let progress_stage1 = if self.use_dither_map != DitherMapMode::None { 20 } else { 0 };
+    pub(crate) fn write_remapped_image_rows_internal(
+        &mut self,
+        image: &mut Image,
+        mut output_pixels: RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
+    ) -> Result<(), Error> {
+        let progress_stage1 = if self.use_dither_map != DitherMapMode::None {
+            20
+        } else {
+            0
+        };
         if self.remap_progress(progress_stage1 as f32 * 0.25) {
             return Err(Error::Aborted);
         }
@@ -94,15 +123,37 @@ impl QuantizationResult {
 
         let mut palette = self.palette.clone();
         let mut remapped = Box::new(Remapped {
-            int_palette: Palette { count: 0, entries: [RGBA::default(); MAX_COLORS] },
+            int_palette: Palette {
+                count: 0,
+                entries: [RGBA::default(); MAX_COLORS],
+            },
             palette_error: None,
         });
         if self.dither_level == 0. {
-            palette.init_int_palette(&mut remapped.int_palette, self.gamma, self.min_posterization_output);
-            remapped.palette_error = Some(remap_to_palette(&mut image.px, image.background.as_deref_mut(), image.importance_map.as_deref(), &mut output_pixels, &mut palette)?.0);
+            palette.init_int_palette(
+                &mut remapped.int_palette,
+                self.gamma,
+                self.min_posterization_output,
+            );
+            remapped.palette_error = Some(
+                remap_to_palette(
+                    &mut image.px,
+                    image.background.as_deref_mut(),
+                    image.importance_map.as_deref(),
+                    &mut output_pixels,
+                    &mut palette,
+                )?
+                .0,
+            );
         } else {
             let uses_background = image.background.is_some();
-            let dither_map_error = Self::optionally_generate_dither_map(self.use_dither_map, image, uses_background, &mut output_pixels, &mut palette)?;
+            let dither_map_error = Self::optionally_generate_dither_map(
+                self.use_dither_map,
+                image,
+                uses_background,
+                &mut output_pixels,
+                &mut palette,
+            )?;
             if self.remap_progress(progress_stage1 as f32 * 0.5) {
                 return Err(Error::Aborted);
             }
@@ -111,25 +162,50 @@ impl QuantizationResult {
             let palette_error = dither_map_error.or(self.palette_error);
 
             // remapping above was the last chance to do K-Means iteration, hence the final palette is set after remapping
-            palette.init_int_palette(&mut remapped.int_palette, self.gamma, self.min_posterization_output);
+            palette.init_int_palette(
+                &mut remapped.int_palette,
+                self.gamma,
+                self.min_posterization_output,
+            );
             remapped.palette_error = palette_error;
-            let max_dither_error = (palette_error.unwrap_or(quality_to_mse(80)) * 2.4).max(quality_to_mse(35)) as f32;
-            remap_to_palette_floyd(image, output_pixels, &palette, self, max_dither_error, output_image_is_remapped)?;
+            let max_dither_error =
+                (palette_error.unwrap_or(quality_to_mse(80)) * 2.4).max(quality_to_mse(35)) as f32;
+            remap_to_palette_floyd(
+                image,
+                output_pixels,
+                &palette,
+                self,
+                max_dither_error,
+                output_image_is_remapped,
+            )?;
         }
         self.remapped = Some(remapped);
         Ok(())
     }
 
-    fn optionally_generate_dither_map(use_dither_map: DitherMapMode, image: &mut Image<'_>, uses_background: bool, output_pixels: &mut RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>, palette: &mut PalF) -> Result<Option<f64>, Error> {
+    fn optionally_generate_dither_map(
+        use_dither_map: DitherMapMode,
+        image: &mut Image<'_>,
+        uses_background: bool,
+        output_pixels: &mut RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
+        palette: &mut PalF,
+    ) -> Result<Option<f64>, Error> {
         let is_image_huge = (image.px.width * image.px.height) > 2000 * 2000;
-        let allow_dither_map = use_dither_map == DitherMapMode::Always || (!is_image_huge && use_dither_map != DitherMapMode::None);
+        let allow_dither_map = use_dither_map == DitherMapMode::Always
+            || (!is_image_huge && use_dither_map != DitherMapMode::None);
         let generate_dither_map = allow_dither_map && image.dither_map.is_none();
         if !generate_dither_map {
             return Ok(None);
         }
 
         // If dithering (with dither map) is required, this image is used to find areas that require dithering
-        let (palette_error, row_pointers_remapped) = remap_to_palette(&mut image.px, None, image.importance_map.as_deref(), output_pixels, palette)?;
+        let (palette_error, row_pointers_remapped) = remap_to_palette(
+            &mut image.px,
+            None,
+            image.importance_map.as_deref(),
+            output_pixels,
+            palette,
+        )?;
         image.update_dither_map(&row_pointers_remapped, &*palette, uses_background)?;
         Ok(Some(palette_error))
     }
@@ -181,7 +257,8 @@ impl QuantizationResult {
     /// Approximate mean square error of the palette used for the most recent remapping
     #[must_use]
     pub fn remapping_error(&self) -> Option<f64> {
-        self.remapped.as_ref()
+        self.remapped
+            .as_ref()
             .and_then(|re| re.palette_error)
             .or(self.palette_error)
             .map(internal_mse_to_standard_mse)
@@ -190,7 +267,8 @@ impl QuantizationResult {
     /// Palette remapping error mapped back to 0-100 scale, same as the scale in [`Attributes::set_quality()`]
     #[must_use]
     pub fn remapping_quality(&self) -> Option<u8> {
-        self.remapped.as_ref()
+        self.remapped
+            .as_ref()
             .and_then(|re| re.palette_error)
             .or(self.palette_error)
             .map(mse_to_quality)
@@ -211,7 +289,11 @@ impl QuantizationResult {
             &remap.int_palette
         } else {
             if self.int_palette.count == 0 {
-                self.palette.init_int_palette(&mut self.int_palette, self.gamma, self.min_posterization_output);
+                self.palette.init_int_palette(
+                    &mut self.int_palette,
+                    self.gamma,
+                    self.min_posterization_output,
+                );
             }
             &self.int_palette
         }
@@ -220,19 +302,27 @@ impl QuantizationResult {
     /// Callback called at various point of processing, which gets percentage of progress done,
     /// and can return `ControlFlow::Break` to abort further processing
     #[inline(always)]
-    pub fn set_progress_callback<F: Fn(f32) -> ControlFlow + Sync + Send + 'static>(&mut self, callback: F) {
+    pub fn set_progress_callback<F: Fn(f32) -> ControlFlow + Sync + Send + 'static>(
+        &mut self,
+        callback: F,
+    ) {
         self.progress_callback = Some(Box::new(callback));
     }
 
     // true == abort
     pub(crate) fn remap_progress(&self, percent: f32) -> bool {
-        self.progress_callback.as_ref().map_or(false, |cb| cb(percent) == ControlFlow::Break)
+        self.progress_callback
+            .as_ref()
+            .map_or(false, |cb| cb(percent) == ControlFlow::Break)
     }
 
     /// Remap image into a palette + indices.
     ///
     /// Returns the palette and a 1-byte-per-pixel uncompressed bitmap
-    pub fn remapped(&mut self, image: &mut Image<'_>) -> Result<(Vec<RGBA>, Vec<PalIndexRemap>), Error> {
+    pub fn remapped(
+        &mut self,
+        image: &mut Image<'_>,
+    ) -> Result<(Vec<RGBA>, Vec<PalIndexRemap>), Error> {
         let mut buf = Vec::new();
         let pal = self.remap_into_vec(image, &mut buf)?;
         Ok((pal, buf))
@@ -244,7 +334,11 @@ impl QuantizationResult {
     ///
     /// Returns the palette.
     #[inline]
-    pub fn remap_into_vec(&mut self, image: &mut Image<'_>, buf: &mut Vec<PalIndexRemap>) -> Result<Vec<RGBA>, Error> {
+    pub fn remap_into_vec(
+        &mut self,
+        image: &mut Image<'_>,
+        buf: &mut Vec<PalIndexRemap>,
+    ) -> Result<Vec<RGBA>, Error> {
         let len = image.width() * image.height();
         // Capacity is essential here, as it creates uninitialized buffer
         unsafe {
@@ -265,7 +359,11 @@ impl QuantizationResult {
     /// You should call [`palette()`][Self::palette] _after_ this call, but not before it,
     /// because remapping refines the palette.
     #[inline]
-    pub fn remap_into(&mut self, image: &mut Image<'_>, output_buf: &mut [MaybeUninit<PalIndexRemap>]) -> Result<(), Error> {
+    pub fn remap_into(
+        &mut self,
+        image: &mut Image<'_>,
+        output_buf: &mut [MaybeUninit<PalIndexRemap>],
+    ) -> Result<(), Error> {
         let required_size = (image.width()) * (image.height());
         let output_buf = output_buf.get_mut(0..required_size).ok_or(BufferTooSmall)?;
 
@@ -339,15 +437,24 @@ fn sort_palette(attr: &Attributes, palette: &mut PalF) {
     let mut tmp: ArrayVec<_, { MAX_COLORS }> = palette.iter_mut().map(|(c, p)| (*c, *p)).collect();
     tmp.sort_by_key(|(color, pop)| {
         let trns = !color.is_fully_opaque();
-        (trns == last_index_transparent, Reverse(OrdFloat::new(pop.popularity())))
+        (
+            trns == last_index_transparent,
+            Reverse(OrdFloat::new(pop.popularity())),
+        )
     });
-    palette.iter_mut().zip(tmp).for_each(|((dcol, dpop), (scol, spop))| {
-        *dcol = scol;
-        *dpop = spop;
-    });
+    palette
+        .iter_mut()
+        .zip(tmp)
+        .for_each(|((dcol, dpop), (scol, spop))| {
+            *dcol = scol;
+            *dpop = spop;
+        });
 
     if last_index_transparent {
-        let alpha_index = palette.as_slice().iter().enumerate()
+        let alpha_index = palette
+            .as_slice()
+            .iter()
+            .enumerate()
             .filter(|(_, c)| !c.is_fully_opaque())
             .min_by_key(|(_, c)| OrdFloat::new(c.a))
             .map(|(i, _)| i);
@@ -356,11 +463,19 @@ fn sort_palette(attr: &Attributes, palette: &mut PalF) {
             palette.swap(last_index, alpha_index);
         }
     } else {
-        let num_transparent = palette.as_slice().iter().enumerate().rev()
+        let num_transparent = palette
+            .as_slice()
+            .iter()
+            .enumerate()
+            .rev()
             .find(|(_, c)| !c.is_fully_opaque())
             .map(|(i, _)| i + 1); // num entries, not index
         if let Some(num_transparent) = num_transparent {
-            attr.verbose_print(format!("  eliminated opaque tRNS-chunk entries...{} entr{} transparent", num_transparent, if num_transparent == 1 { "y" } else { "ies" }));
+            attr.verbose_print(format!(
+                "  eliminated opaque tRNS-chunk entries...{} entr{} transparent",
+                num_transparent,
+                if num_transparent == 1 { "y" } else { "ies" }
+            ));
         }
     }
 }
@@ -368,7 +483,11 @@ fn sort_palette(attr: &Attributes, palette: &mut PalF) {
 impl fmt::Debug for QuantizationResult {
     #[cold]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "QuantizationResult(q={})", self.quantization_quality().unwrap_or(0))
+        write!(
+            f,
+            "QuantizationResult(q={})",
+            self.quantization_quality().unwrap_or(0)
+        )
     }
 }
 
@@ -376,7 +495,13 @@ impl fmt::Debug for QuantizationResult {
 ///
 ///  `feedback_loop_trials` controls how long the search will take. < 0 skips the iteration.
 #[allow(clippy::or_fun_call)]
-pub(crate) fn find_best_palette(attr: &Attributes, target_mse: f64, target_mse_is_zero: bool, max_mse: Option<f64>, mut hist: HistogramInternal) -> Result<(PalF, Option<f64>), Error> {
+pub(crate) fn find_best_palette(
+    attr: &Attributes,
+    target_mse: f64,
+    target_mse_is_zero: bool,
+    max_mse: Option<f64>,
+    mut hist: HistogramInternal,
+) -> Result<(PalF, Option<f64>), Error> {
     // hist.items includes fixed colors already
     let few_input_colors = hist.items.len() <= attr.max_colors as usize;
     // actual target_mse passed to this method has extra diff from posterization
@@ -392,21 +517,48 @@ pub(crate) fn find_best_palette(attr: &Attributes, target_mse: f64, target_mse_i
     let mut fails_in_a_row = 0;
     let mut palette_error = None;
     let mut palette = loop {
-        let max_mse_per_color = target_mse.max(palette_error.unwrap_or(quality_to_mse(1))).max(quality_to_mse(51)) * 1.2;
-        let mut new_palette = mediancut(&mut hist, max_colors, target_mse * target_mse_overshoot, max_mse_per_color)?
-            .with_fixed_colors(attr.max_colors, &hist.fixed_colors);
+        let max_mse_per_color = target_mse
+            .max(palette_error.unwrap_or(quality_to_mse(1)))
+            .max(quality_to_mse(51))
+            * 1.2;
+        let mut new_palette = mediancut(
+            &mut hist,
+            max_colors,
+            target_mse * target_mse_overshoot,
+            max_mse_per_color,
+        )?
+        .with_fixed_colors(attr.max_colors, &hist.fixed_colors);
 
-        let stage_done = (f32::from(trials_left.max(0)) / f32::from(total_trials + 1)).mul_add(-(f32::from(trials_left.max(0)) / f32::from(total_trials + 1)), 1.);
-        let overall_done = stage_done.mul_add(f32::from(attr.progress_stage2), f32::from(attr.progress_stage1));
-        attr.verbose_print(format!("  selecting colors...{}%", (100. * stage_done) as u8));
+        let stage_done = (f32::from(trials_left.max(0)) / f32::from(total_trials + 1)).mul_add(
+            -(f32::from(trials_left.max(0)) / f32::from(total_trials + 1)),
+            1.,
+        );
+        let overall_done = stage_done.mul_add(
+            f32::from(attr.progress_stage2),
+            f32::from(attr.progress_stage1),
+        );
+        attr.verbose_print(format!(
+            "  selecting colors...{}%",
+            (100. * stage_done) as u8
+        ));
 
-        if trials_left <= 0 { break Some(new_palette); }
+        if trials_left <= 0 {
+            break Some(new_palette);
+        }
 
         let first_run_of_target_mse = best_palette.is_none() && target_mse > 0.;
         let total_error = Kmeans::iteration(&mut hist, &mut new_palette, !first_run_of_target_mse)?;
-        if best_palette.is_none() || total_error < palette_error.unwrap_or(f64::MAX) || (total_error <= target_mse && new_palette.len() < max_colors as usize) {
+        if best_palette.is_none()
+            || total_error < palette_error.unwrap_or(f64::MAX)
+            || (total_error <= target_mse && new_palette.len() < max_colors as usize)
+        {
             if total_error < target_mse && total_error > 0. {
-                target_mse_overshoot = if (target_mse_overshoot * 1.25) < (target_mse / total_error) {target_mse_overshoot * 1.25 } else {target_mse / total_error }; // if number of colors could be reduced, try to keep it that way
+                target_mse_overshoot = if (target_mse_overshoot * 1.25) < (target_mse / total_error)
+                {
+                    target_mse_overshoot * 1.25
+                } else {
+                    target_mse / total_error
+                }; // if number of colors could be reduced, try to keep it that way
             }
             palette_error = Some(total_error);
             max_colors = max_colors.min(new_palette.len() as PalLen + 1);
@@ -421,22 +573,32 @@ pub(crate) fn find_best_palette(attr: &Attributes, target_mse: f64, target_mse_i
         if attr.progress(overall_done) || trials_left <= 0 {
             break best_palette;
         }
-    }.ok_or(ValueOutOfRange)?;
+    }
+    .ok_or(ValueOutOfRange)?;
 
     refine_palette(&mut palette, attr, &mut hist, max_mse, &mut palette_error)?;
 
     Ok((palette, palette_error))
 }
 
-
-fn refine_palette(palette: &mut PalF, attr: &Attributes, hist: &mut HistogramInternal, max_mse: Option<f64>, palette_error: &mut Option<f64>) -> Result<(), Error> {
-    let (iterations, iteration_limit) = attr.kmeans_iterations(hist.items.len(), palette_error.is_some());
+fn refine_palette(
+    palette: &mut PalF,
+    attr: &Attributes,
+    hist: &mut HistogramInternal,
+    max_mse: Option<f64>,
+    palette_error: &mut Option<f64>,
+) -> Result<(), Error> {
+    let (iterations, iteration_limit) =
+        attr.kmeans_iterations(hist.items.len(), palette_error.is_some());
     if iterations > 0 {
         attr.verbose_print("  moving colormap towards local minimum");
         let mut i = 0;
         while i < iterations {
             let stage_done = f32::from(i) / f32::from(iterations);
-            let overall_done = (stage_done * f32::from(attr.progress_stage3)).mul_add(0.89, f32::from(attr.progress_stage1) + f32::from(attr.progress_stage2));
+            let overall_done = (stage_done * f32::from(attr.progress_stage3)).mul_add(
+                0.89,
+                f32::from(attr.progress_stage1) + f32::from(attr.progress_stage2),
+            );
             if attr.progress(overall_done) {
                 break;
             }
@@ -451,7 +613,11 @@ fn refine_palette(palette: &mut PalF, attr: &Attributes, hist: &mut HistogramInt
                     break;
                 }
             }
-            i += if pal_err > max_mse.unwrap_or(1e20) * 1.5 { 2 } else { 1 };
+            i += if pal_err > max_mse.unwrap_or(1e20) * 1.5 {
+                2
+            } else {
+                1
+            };
         }
     }
     Ok(())
@@ -464,21 +630,31 @@ fn palette_from_histogram(hist: &HistogramInternal, max_colors: PalLen) -> (PalF
         hist_pal.push(item.color, PalPop::new(item.perceptual_weight));
     }
 
-    (hist_pal.with_fixed_colors(max_colors, &hist.fixed_colors), Some(0.))
+    (
+        hist_pal.with_fixed_colors(max_colors, &hist.fixed_colors),
+        Some(0.),
+    )
 }
 
 pub(crate) fn quality_to_mse(quality: u8) -> f64 {
     if quality == 0 {
         return 1e20; // + epsilon for floating point errors
     }
-    if quality >= 100 { return 0.; }
+    if quality >= 100 {
+        return 0.;
+    }
     let extra_low_quality_fudge = (0.016 / (0.001 + f64::from(quality)) - 0.001).max(0.);
-    unit_mse_to_internal_mse(extra_low_quality_fudge + 2.5 / (210. + f64::from(quality)).powf(1.2) * (100.1 - f64::from(quality)) / 100.)
+    unit_mse_to_internal_mse(
+        extra_low_quality_fudge
+            + 2.5 / (210. + f64::from(quality)).powf(1.2) * (100.1 - f64::from(quality)) / 100.,
+    )
 }
 
 pub(crate) fn mse_to_quality(mse: f64) -> u8 {
     for i in (1..101).rev() {
-        if mse <= quality_to_mse(i) + 0.000001 { return i; }
+        if mse <= quality_to_mse(i) + 0.000001 {
+            return i;
+        }
     }
     0
 }

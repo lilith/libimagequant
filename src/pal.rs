@@ -64,9 +64,9 @@ impl f_pixel {
             g: black.g + alphas,
             b: black.b + alphas,
         };
-        (black.r * black.r).max(white.r * white.r) +
-        (black.g * black.g).max(white.g * white.g) +
-        (black.b * black.b).max(white.b * white.b)
+        (black.r * black.r).max(white.r * white.r)
+            + (black.g * black.g).max(white.g * white.g)
+            + (black.b * black.b).max(white.b * white.b)
     }
 
     #[inline]
@@ -226,7 +226,11 @@ impl PalF {
     }
 
     // this is max colors allowed by the user, not just max in the current (candidate/low-quality) palette
-    pub(crate) fn with_fixed_colors(mut self, max_colors: PalLen, fixed_colors: &[f_pixel]) -> Self {
+    pub(crate) fn with_fixed_colors(
+        mut self,
+        max_colors: PalLen,
+        fixed_colors: &[f_pixel],
+    ) -> Self {
         if fixed_colors.is_empty() {
             return self;
         }
@@ -235,25 +239,37 @@ impl PalF {
         let max_fixed_colors = fixed_colors.len().min(max_colors as usize);
         if self.len() < max_fixed_colors {
             let needs_extra = max_fixed_colors - self.len();
-            self.colors.extend(fixed_colors.iter().copied().take(needs_extra));
-            self.pops.extend(iter::repeat(PalPop::new(0.)).take(needs_extra));
+            self.colors
+                .extend(fixed_colors.iter().copied().take(needs_extra));
+            self.pops
+                .extend(iter::repeat(PalPop::new(0.)).take(needs_extra));
             debug_assert_eq!(self.len(), max_fixed_colors);
         }
 
         // since the fixed colors were in the histogram, expect them to be in the palette,
         // and change closest existing one to be exact fixed
         for (i, fixed_color) in fixed_colors.iter().enumerate().take(self.len()) {
-            let (best_idx, _) = self.colors.iter().enumerate().skip(i).min_by_key(|(_, pal_color)| {
-                // not using Nearest, because creation of the index may take longer than naive search once
-                OrdFloat::new(pal_color.diff(fixed_color))
-            }).expect("logic bug in fixed colors, please report a bug");
+            let (best_idx, _) = self
+                .colors
+                .iter()
+                .enumerate()
+                .skip(i)
+                .min_by_key(|(_, pal_color)| {
+                    // not using Nearest, because creation of the index may take longer than naive search once
+                    OrdFloat::new(pal_color.diff(fixed_color))
+                })
+                .expect("logic bug in fixed colors, please report a bug");
             debug_assert!(best_idx >= i);
             self.swap(i, best_idx);
             self.set(i, *fixed_color, self.pops[i].to_fixed());
         }
 
         debug_assert!(self.colors.iter().zip(fixed_colors).all(|(p, f)| p == f));
-        debug_assert!(self.pops.iter().take(fixed_colors.len()).all(|pop| pop.is_fixed()));
+        debug_assert!(self
+            .pops
+            .iter()
+            .take(fixed_colors.len())
+            .all(|pop| pop.is_fixed()));
         self
     }
 
@@ -277,10 +293,16 @@ impl PalF {
     }
 
     /// Also rounds the input pal
-    pub(crate) fn init_int_palette(&mut self, int_palette: &mut Palette, gamma: f64, posterize: u8) {
+    pub(crate) fn init_int_palette(
+        &mut self,
+        int_palette: &mut Palette,
+        gamma: f64,
+        posterize: u8,
+    ) {
         let lut = gamma_lut(gamma);
         for ((f_color, f_pop), int_pal) in self.iter_mut().zip(&mut int_palette.entries) {
-            let mut px = f_color.to_rgb(gamma)
+            let mut px = f_color
+                .to_rgb(gamma)
                 .map(move |c| posterize_channel(c, posterize));
             *f_color = f_pixel::from_rgba(&lut, px);
             if px.a == 0 && !f_pop.is_fixed() {
@@ -367,24 +389,84 @@ impl Palette {
 
 #[test]
 fn diff_test() {
-    let a = f_pixel(ARGBF {a: 1., r: 0.2, g: 0.3, b: 0.5});
-    let b = f_pixel(ARGBF {a: 1., r: 0.3, g: 0.3, b: 0.5});
-    let c = f_pixel(ARGBF {a: 1., r: 1., g: 0.3, b: 0.5});
-    let d = f_pixel(ARGBF {a: 0., r: 1., g: 0.3, b: 0.5});
+    let a = f_pixel(ARGBF {
+        a: 1.,
+        r: 0.2,
+        g: 0.3,
+        b: 0.5,
+    });
+    let b = f_pixel(ARGBF {
+        a: 1.,
+        r: 0.3,
+        g: 0.3,
+        b: 0.5,
+    });
+    let c = f_pixel(ARGBF {
+        a: 1.,
+        r: 1.,
+        g: 0.3,
+        b: 0.5,
+    });
+    let d = f_pixel(ARGBF {
+        a: 0.,
+        r: 1.,
+        g: 0.3,
+        b: 0.5,
+    });
     assert!(a.diff(&b) < b.diff(&c));
     assert!(c.diff(&b) < c.diff(&d));
 
-    let a = f_pixel(ARGBF {a: 1., b: 0.2, r: 0.3, g: 0.5});
-    let b = f_pixel(ARGBF {a: 1., b: 0.3, r: 0.3, g: 0.5});
-    let c = f_pixel(ARGBF {a: 1., b: 1., r: 0.3, g: 0.5});
-    let d = f_pixel(ARGBF {a: 0., b: 1., r: 0.3, g: 0.5});
+    let a = f_pixel(ARGBF {
+        a: 1.,
+        b: 0.2,
+        r: 0.3,
+        g: 0.5,
+    });
+    let b = f_pixel(ARGBF {
+        a: 1.,
+        b: 0.3,
+        r: 0.3,
+        g: 0.5,
+    });
+    let c = f_pixel(ARGBF {
+        a: 1.,
+        b: 1.,
+        r: 0.3,
+        g: 0.5,
+    });
+    let d = f_pixel(ARGBF {
+        a: 0.,
+        b: 1.,
+        r: 0.3,
+        g: 0.5,
+    });
     assert!(a.diff(&b) < b.diff(&c));
     assert!(c.diff(&b) < c.diff(&d));
 
-    let a = f_pixel(ARGBF {a: 1., g: 0.2, b: 0.3, r: 0.5});
-    let b = f_pixel(ARGBF {a: 1., g: 0.3, b: 0.3, r: 0.5});
-    let c = f_pixel(ARGBF {a: 1., g: 1., b: 0.3, r: 0.5});
-    let d = f_pixel(ARGBF {a: 0., g: 1., b: 0.3, r: 0.5});
+    let a = f_pixel(ARGBF {
+        a: 1.,
+        g: 0.2,
+        b: 0.3,
+        r: 0.5,
+    });
+    let b = f_pixel(ARGBF {
+        a: 1.,
+        g: 0.3,
+        b: 0.3,
+        r: 0.5,
+    });
+    let c = f_pixel(ARGBF {
+        a: 1.,
+        g: 1.,
+        b: 0.3,
+        r: 0.5,
+    });
+    let d = f_pixel(ARGBF {
+        a: 0.,
+        g: 1.,
+        b: 0.3,
+        r: 0.5,
+    });
     assert!(a.diff(&b) < b.diff(&c));
     assert!(c.diff(&b) < c.diff(&d));
 }
@@ -398,12 +480,22 @@ fn diff_simd_matches_scalar() {
         for &r1 in values {
             for &g1 in values {
                 for &b1 in values {
-                    let px1 = f_pixel(ARGBF { a: a1, r: r1, g: g1, b: b1 });
+                    let px1 = f_pixel(ARGBF {
+                        a: a1,
+                        r: r1,
+                        g: g1,
+                        b: b1,
+                    });
                     for &a2 in values {
                         for &r2 in values {
                             for &g2 in values {
                                 for &b2 in values {
-                                    let px2 = f_pixel(ARGBF { a: a2, r: r2, g: g2, b: b2 });
+                                    let px2 = f_pixel(ARGBF {
+                                        a: a2,
+                                        r: r2,
+                                        g: g2,
+                                        b: b2,
+                                    });
                                     let simd = px1.diff(&px2);
                                     let scalar = px1.diff_scalar(&px2);
                                     let diff = (simd - scalar).abs();
@@ -426,19 +518,37 @@ fn diff_simd_matches_scalar() {
 fn alpha_test() {
     let gamma = gamma_lut(0.45455);
     for (start, end) in [
-        (RGBA::new(0,0,0,0), RGBA::new(0,0,0,2)),
-        (RGBA::new(0,0,0,253), RGBA::new(0,0,0,255))
+        (RGBA::new(0, 0, 0, 0), RGBA::new(0, 0, 0, 2)),
+        (RGBA::new(0, 0, 0, 253), RGBA::new(0, 0, 0, 255)),
     ] {
         let start = f_pixel::from_rgba(&gamma, start).a as f64;
         let end = f_pixel::from_rgba(&gamma, end).a as f64;
         let range = end - start;
         for i in 0..1000 {
             let a = (start + ((i as f64) / 1000. * range)) as f32;
-            for a in [a, a.next_up(), a.next_down(), a+1e-6, a-1e-6] {
-                let px = f_pixel(ARGBF {a, g: 0., b: 0., r: 0.});
+            for a in [a, a.next_up(), a.next_down(), a + 1e-6, a - 1e-6] {
+                let px = f_pixel(ARGBF {
+                    a,
+                    g: 0.,
+                    b: 0.,
+                    r: 0.,
+                });
                 let rgb = px.to_rgb(0.45455);
-                assert_eq!(rgb.a == 0, px.is_fully_transparent(), "not trns!? {px:?}, {rgb:?} {} {}", a / LIQ_WEIGHT_A, a / LIQ_WEIGHT_A * 255.);
-                assert_eq!(rgb.a == 255, px.is_fully_opaque(), "not opaque?! {px:?}, {rgb:?} {} {} {}", a / LIQ_WEIGHT_A, a / LIQ_WEIGHT_A * 255., a / LIQ_WEIGHT_A * 256.);
+                assert_eq!(
+                    rgb.a == 0,
+                    px.is_fully_transparent(),
+                    "not trns!? {px:?}, {rgb:?} {} {}",
+                    a / LIQ_WEIGHT_A,
+                    a / LIQ_WEIGHT_A * 255.
+                );
+                assert_eq!(
+                    rgb.a == 255,
+                    px.is_fully_opaque(),
+                    "not opaque?! {px:?}, {rgb:?} {} {} {}",
+                    a / LIQ_WEIGHT_A,
+                    a / LIQ_WEIGHT_A * 255.,
+                    a / LIQ_WEIGHT_A * 256.
+                );
             }
         }
     }
@@ -478,7 +588,7 @@ fn largepal() {
     let gamma = gamma_lut(0.5);
     let mut p = PalF::new();
     for i in 0..1000 {
-        let rgba = RGBA::new(i as u8, (i/2) as u8, (i/4) as u8, 255);
+        let rgba = RGBA::new(i as u8, (i / 2) as u8, (i / 4) as u8, 255);
         p.push(f_pixel::from_rgba(&gamma, rgba), PalPop::new(1.));
     }
 }
