@@ -1,8 +1,11 @@
 use crate::error::Error;
 use crate::pal::{f_pixel, gamma_lut, RGBA};
-use crate::seacow::{Pointer, SeaCow};
+#[cfg(feature = "_internal_c_ffi")]
+use crate::seacow::Pointer;
+use crate::seacow::SeaCow;
 use crate::LIQ_HIGH_MEMORY_LIMIT;
 use core::mem::{size_of, MaybeUninit};
+#[cfg(feature = "_internal_c_ffi")]
 use core::slice;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
@@ -11,10 +14,18 @@ use std::{boxed::Box, vec::Vec};
 pub(crate) type RowCallback<'a> = dyn Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync + 'a;
 
 pub(crate) enum PixelsSource<'pixels, 'rows> {
-    /// The `pixels` field is never read, but it is used to store the rows.
-    #[allow(dead_code)]
-    Pixels {
+    /// Pure Rust: contiguous memory with stride, no raw pointers needed
+    Contiguous {
+        pixels: SeaCow<'pixels, RGBA>,
+        stride: usize,
+        /// Precomputed row starting offsets - avoids multiply in hot path
+        row_offsets: Box<[usize]>,
+    },
+    /// C FFI only: non-contiguous row pointers from C
+    #[cfg(feature = "_internal_c_ffi")]
+    RowPointers {
         rows: SeaCow<'rows, Pointer<RGBA>>,
+        /// Original pixel buffer (kept alive, may be None if rows point elsewhere)
         pixels: Option<SeaCow<'pixels, RGBA>>,
     },
     Callback(Box<RowCallback<'rows>>),
@@ -30,30 +41,29 @@ impl<'pixels> PixelsSource<'pixels, '_> {
         if stride < width || height == 0 || width == 0 {
             return Err(Error::ValueOutOfRange);
         }
-        let stride = stride as usize;
+        let stride_usize = stride as usize;
         let width = width as usize;
         let height = height as usize;
 
         let slice = pixels.as_slice();
-        let min_area = stride
+        let min_area = stride_usize
             .checked_mul(height)
             .and_then(|a| a.checked_add(width))
             .ok_or(Error::ValueOutOfRange)?
-            - stride;
+            - stride_usize;
         if slice.len() < min_area {
             return Err(Error::BufferTooSmall);
         }
 
-        let rows = SeaCow::boxed(
-            slice
-                .chunks(stride)
-                .map(|row| Pointer(row.as_ptr()))
-                .take(height)
-                .collect(),
-        );
-        Ok(Self::Pixels {
-            rows,
-            pixels: Some(pixels),
+        // Pure Rust path: precompute row offsets to avoid multiply in hot path
+        let mut row_offsets = Vec::new();
+        row_offsets.try_reserve_exact(height)?;
+        row_offsets.extend((0..height).map(|row| row * stride_usize));
+
+        Ok(Self::Contiguous {
+            pixels,
+            stride: stride_usize,
+            row_offsets: row_offsets.into_boxed_slice(),
         })
     }
 }
@@ -73,7 +83,13 @@ impl Clone for DynamicRows<'_, '_> {
             height: self.height,
             f_pixels: self.f_pixels.clone(),
             pixels: match &self.pixels {
-                PixelsSource::Pixels { rows, pixels } => PixelsSource::Pixels {
+                PixelsSource::Contiguous { pixels, stride, row_offsets } => PixelsSource::Contiguous {
+                    pixels: pixels.clone(),
+                    stride: *stride,
+                    row_offsets: row_offsets.clone(),
+                },
+                #[cfg(feature = "_internal_c_ffi")]
+                PixelsSource::RowPointers { rows, pixels } => PixelsSource::RowPointers {
                     rows: rows.clone(),
                     pixels: pixels.clone(),
                 },
@@ -169,9 +185,21 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         }
     }
 
+    #[inline(always)]
     fn row_rgba<'px>(&'px self, temp_row: &'px mut [MaybeUninit<RGBA>], row: usize) -> &'px [RGBA] {
         match &self.pixels {
-            PixelsSource::Pixels { rows, .. } => unsafe {
+            PixelsSource::Contiguous { pixels, row_offsets, .. } => {
+                let slice = pixels.as_slice();
+                let width = self.width();
+                // Use precomputed offset - just array index, no multiply
+                let start = row_offsets[row];
+                // debug_assert helps compiler understand bounds are valid
+                debug_assert!(start + width <= slice.len());
+                // Split pattern often optimizes better than range indexing
+                &slice[start..][..width]
+            }
+            #[cfg(feature = "_internal_c_ffi")]
+            PixelsSource::RowPointers { rows, .. } => unsafe {
                 slice::from_raw_parts(rows.as_slice()[row].0, self.width())
             },
             PixelsSource::Callback(cb) => {
@@ -255,10 +283,15 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     #[inline]
     pub fn rgba_rows_iter(&self) -> Result<DynamicRowsIter<'_, 'pixels, 'rows>, Error> {
         // This happens when histogram image is recycled
-        if let PixelsSource::Pixels { rows, .. } = &self.pixels {
-            if rows.as_slice().is_empty() {
+        match &self.pixels {
+            PixelsSource::Contiguous { row_offsets, .. } if row_offsets.is_empty() => {
                 return Err(Error::Unsupported);
             }
+            #[cfg(feature = "_internal_c_ffi")]
+            PixelsSource::RowPointers { rows, .. } if rows.as_slice().is_empty() => {
+                return Err(Error::Unsupported);
+            }
+            _ => {}
         }
         Ok(DynamicRowsIter {
             px: self,
@@ -285,19 +318,19 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     ) -> Result<(), Error> {
         if own_rows {
             match &mut self.pixels {
-                PixelsSource::Pixels { rows, .. } => rows.make_owned(free_fn),
-                PixelsSource::Callback(_) => return Err(Error::ValueOutOfRange),
+                PixelsSource::RowPointers { rows, .. } => rows.make_owned(free_fn),
+                _ => return Err(Error::ValueOutOfRange),
             }
         }
 
         if own_pixels {
             let len = self.width() * self.height();
             match &mut self.pixels {
-                PixelsSource::Pixels {
+                PixelsSource::RowPointers {
                     pixels: Some(pixels),
                     ..
                 } => pixels.make_owned(free_fn),
-                PixelsSource::Pixels { pixels, rows } => {
+                PixelsSource::RowPointers { pixels, rows } => {
                     // the row with the lowest address is assumed to be at the start of the bitmap
                     let ptr = rows
                         .as_slice()
@@ -307,7 +340,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
                         .ok_or(Error::Unsupported)?;
                     *pixels = Some(SeaCow::c_owned(ptr.cast_mut(), len, free_fn));
                 }
-                PixelsSource::Callback(_) => return Err(Error::ValueOutOfRange),
+                _ => return Err(Error::ValueOutOfRange),
             }
         }
         Ok(())
@@ -315,9 +348,10 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
 
     pub fn free_histogram_inputs(&mut self) {
         if self.f_pixels.is_some() {
-            self.pixels = PixelsSource::Pixels {
-                rows: SeaCow::borrowed(&[]),
-                pixels: None,
+            self.pixels = PixelsSource::Contiguous {
+                pixels: SeaCow::borrowed(&[]),
+                stride: 0,
+                row_offsets: Box::new([]),
             };
         }
     }

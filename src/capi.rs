@@ -37,7 +37,7 @@ pub unsafe fn liq_image_create_rgba_rows_impl<'rows>(
     }
     crate::image::Image::new_internal(
         attr,
-        crate::rows::PixelsSource::Pixels { rows, pixels: None },
+        crate::rows::PixelsSource::RowPointers { rows, pixels: None },
         width,
         height,
         gamma,
@@ -62,7 +62,7 @@ pub unsafe fn liq_image_create_rgba_bitmap_impl<'rows>(
     }
     crate::image::Image::new_internal(
         attr,
-        crate::rows::PixelsSource::Pixels { rows, pixels: None },
+        crate::rows::PixelsSource::RowPointers { rows, pixels: None },
         width,
         height,
         gamma,
