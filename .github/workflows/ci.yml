@@ -2,32 +2,84 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  build:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest, windows-11-arm, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test (no default features)
+        run: cargo test --no-default-features
+
+      - name: Test (default features)
+        run: cargo test
+
+      - name: Test (all features)
+        run: cargo test --all-features --all
+
+      - name: Test (release)
+        run: cargo test --all-features --all --release
+
+  no_std:
+    name: no_std (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - thumbv7m-none-eabi
+          - thumbv7em-none-eabihf
+          - riscv32imac-unknown-none-elf
+          - wasm32-unknown-unknown
+          - wasm32-wasip1
+          - aarch64-unknown-none
+          - x86_64-unknown-none
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build no_std
+        run: cargo build --no-default-features --features no_std --target ${{ matrix.target }}
+
+  clippy:
+    name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions-rs/toolchain@v1
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          profile: minimal
-          toolchain: stable
-      - uses: actions-rs/cargo@v1
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Clippy (lib + tests)
+        run: cargo clippy --lib --tests -- -D warnings
+
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          command: test
-          args: --no-default-features
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --all
-      - uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --all-features --all --release
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check
