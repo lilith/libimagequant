@@ -4,7 +4,7 @@
 //!
 //! See `examples/` directory for example code.
 #![cfg_attr(all(not(feature = "std"), feature = "no_std"), no_std)]
-#![cfg_attr(not(feature = "_internal_c_ffi"), deny(unsafe_code))]
+#![cfg_attr(all(not(feature = "_internal_c_ffi"), not(feature = "no_std")), deny(unsafe_code))]
 #![doc(html_logo_url = "https://pngquant.org/pngquant-logo.png")]
 #![deny(missing_docs)]
 #![allow(clippy::bool_to_int_with_if)]

@@ -9,7 +9,7 @@ use core::mem::size_of;
 use core::slice;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
-use std::{boxed::Box, vec::Vec};
+use std::{boxed::Box, vec, vec::Vec};
 
 /// Callback for generating pixel rows on demand.
 /// The callback receives a pre-initialized buffer and row index.
