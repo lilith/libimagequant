@@ -76,6 +76,7 @@ pub(crate) struct DynamicRows<'pixels, 'rows> {
     pub(crate) gamma: f64,
 }
 
+#[allow(unsafe_code)]
 impl Clone for DynamicRows<'_, '_> {
     fn clone(&self) -> Self {
         Self {
@@ -186,6 +187,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 
     #[inline(always)]
+    #[allow(unsafe_code)]
     fn row_rgba<'px>(&'px self, temp_row: &'px mut [MaybeUninit<RGBA>], row: usize) -> &'px [RGBA] {
         match &self.pixels {
             PixelsSource::Contiguous { pixels, row_offsets, .. } => {
@@ -210,6 +212,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         }
     }
 
+    #[allow(unsafe_code)]
     fn convert_row_to_f<'f>(
         row_f_pixels: &'f mut [MaybeUninit<f_pixel>],
         row_pixels: &[RGBA],
@@ -219,7 +222,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         for (dst, src) in row_f_pixels.iter_mut().zip(row_pixels) {
             dst.write(f_pixel::from_rgba(gamma_lut, *src));
         }
-        // Safe, just initialized
+        // SAFETY: All elements just initialized above
         unsafe { slice_assume_init_mut(row_f_pixels) }
     }
 
@@ -236,6 +239,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
         Ok(Some(temp_buf(self.width())?))
     }
 
+    #[allow(unsafe_code)]
     pub fn prepare_iter(
         &mut self,
         temp_row: &mut [MaybeUninit<RGBA>],
@@ -254,7 +258,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
             let row_pixels = self.row_rgba(temp_row, row);
             Self::convert_row_to_f(f_row, row_pixels, &lut);
         }
-        // just initialized
+        // SAFETY: All elements initialized by convert_row_to_f above
         self.f_pixels = Some(unsafe { box_assume_init(f_pixels) });
         Ok(())
     }
@@ -369,9 +373,11 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 }
 
+#[allow(unsafe_code)]
 pub(crate) fn temp_buf<T>(len: usize) -> Result<Box<[MaybeUninit<T>]>, Error> {
     let mut v = Vec::new();
     v.try_reserve_exact(len)?;
+    // SAFETY: MaybeUninit doesn't require initialization
     unsafe { v.set_len(len) };
     Ok(v.into_boxed_slice())
 }
@@ -386,12 +392,16 @@ fn send() {
     is_sync::<PixelsSource>();
 }
 
+/// SAFETY: All elements must have been initialized
 #[inline(always)]
+#[allow(unsafe_code)]
 unsafe fn box_assume_init<T>(s: Box<[MaybeUninit<T>]>) -> Box<[T]> {
     core::mem::transmute(s)
 }
 
+/// SAFETY: All elements must have been initialized
 #[inline(always)]
+#[allow(unsafe_code)]
 unsafe fn slice_assume_init_mut<T>(s: &mut [MaybeUninit<T>]) -> &mut [T] {
     &mut *(s as *mut [MaybeUninit<T>] as *mut [T])
 }

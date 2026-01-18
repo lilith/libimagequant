@@ -1,4 +1,5 @@
-use core::mem::{self, MaybeUninit};
+use core::mem::MaybeUninit;
+#[cfg(feature = "_internal_c_ffi")]
 use core::slice;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
@@ -12,22 +13,30 @@ pub struct SeaCow<'a, T> {
     inner: SeaCowInner<'a, T>,
 }
 
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Send> Send for SeaCowInner<'_, T> {}
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Sync> Sync for SeaCowInner<'_, T> {}
 
 /// Rust assumes `*const T` is never `Send`/`Sync`, but it can be.
 /// This is fudge for https://github.com/rust-lang/rust/issues/93367
+#[cfg(feature = "_internal_c_ffi")]
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub(crate) struct Pointer<T>(pub *const T);
 
+#[cfg(feature = "_internal_c_ffi")]
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub(crate) struct PointerMut<T>(pub *mut T);
 
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Send + Sync> Send for Pointer<T> {}
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Send + Sync> Sync for Pointer<T> {}
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Send + Sync> Send for PointerMut<T> {}
+#[cfg(feature = "_internal_c_ffi")]
 unsafe impl<T: Send + Sync> Sync for PointerMut<T> {}
 
 impl<T> SeaCow<'static, T> {
@@ -133,43 +142,113 @@ impl<T> SeaCow<'_, T> {
     }
 }
 
-pub(crate) struct RowBitmap<'a, T> {
-    rows: &'a [Pointer<T>],
-    width: usize,
+/// Read-only bitmap view - returned after remapping
+pub(crate) enum RowBitmap<'a, T> {
+    /// Safe contiguous data (pure Rust path)
+    Contiguous { data: &'a [T], width: usize },
+    /// Raw pointer rows (C FFI path)
+    #[cfg(feature = "_internal_c_ffi")]
+    RowPointers {
+        rows: &'a [Pointer<T>],
+        width: usize,
+    },
 }
-unsafe impl<T: Send + Sync> Send for RowBitmap<'_, T> {}
 
-pub(crate) struct RowBitmapMut<'a, T> {
-    rows: MutCow<'a, [PointerMut<T>]>,
-    width: usize,
+/// Mutable bitmap view - used during remapping
+pub(crate) enum RowBitmapMut<'a, T> {
+    /// Safe contiguous data (pure Rust path)
+    Contiguous { data: &'a mut [T], width: usize },
+    /// Raw pointer rows (C FFI path)
+    #[cfg(feature = "_internal_c_ffi")]
+    RowPointers {
+        rows: MutCow<'a, [PointerMut<T>]>,
+        width: usize,
+    },
 }
-unsafe impl<T: Send + Sync> Send for RowBitmapMut<'_, T> {}
 
 impl<T> RowBitmapMut<'_, MaybeUninit<T>> {
+    /// Convert MaybeUninit bitmap to initialized bitmap
+    ///
+    /// # Safety
+    /// All elements must have been initialized
     #[inline]
-    pub(crate) unsafe fn assume_init<'maybeowned>(
+    #[allow(unsafe_code)]
+    pub(crate) fn assume_init<'maybeowned>(
         &'maybeowned mut self,
     ) -> RowBitmap<'maybeowned, T> {
-        #[allow(clippy::transmute_ptr_to_ptr)]
-        RowBitmap {
-            width: self.width,
-            rows: mem::transmute::<
-                &'maybeowned [PointerMut<MaybeUninit<T>>],
-                &'maybeowned [Pointer<T>],
-            >(self.rows.borrow_mut()),
+        match self {
+            Self::Contiguous { data, width } => {
+                // SAFETY: MaybeUninit<T> and T have the same layout
+                // Caller guarantees all elements are initialized
+                let initialized: &[T] = unsafe {
+                    &*((*data) as *const [MaybeUninit<T>] as *const [T])
+                };
+                RowBitmap::Contiguous {
+                    data: initialized,
+                    width: *width,
+                }
+            }
+            #[cfg(feature = "_internal_c_ffi")]
+            Self::RowPointers { rows, width } => {
+                #[allow(clippy::transmute_ptr_to_ptr)]
+                RowBitmap::RowPointers {
+                    width: *width,
+                    rows: unsafe {
+                        core::mem::transmute::<
+                            &'maybeowned [PointerMut<MaybeUninit<T>>],
+                            &'maybeowned [Pointer<T>],
+                        >(rows.borrow_mut())
+                    },
+                }
+            }
         }
     }
 }
 
 impl<T> RowBitmap<'_, T> {
+    #[cfg(not(feature = "_internal_c_ffi"))]
     pub fn rows(&self) -> impl Iterator<Item = &[T]> {
-        let width = self.width;
-        self.rows
-            .iter()
-            .map(move |row| unsafe { slice::from_raw_parts(row.0, width) })
+        match self {
+            Self::Contiguous { data, width } => data.chunks_exact(*width),
+        }
+    }
+
+    #[cfg(feature = "_internal_c_ffi")]
+    pub fn rows(&self) -> impl Iterator<Item = &[T]> {
+        match self {
+            Self::Contiguous { data, width } => {
+                RowBitmapIter::Contiguous(data.chunks_exact(*width))
+            }
+            Self::RowPointers { rows, width } => {
+                let width = *width;
+                RowBitmapIter::RowPointers(
+                    rows.iter()
+                        .map(move |row| unsafe { slice::from_raw_parts(row.0, width) }),
+                )
+            }
+        }
     }
 }
 
+#[cfg(feature = "_internal_c_ffi")]
+enum RowBitmapIter<'a, T, I: Iterator<Item = &'a [T]>> {
+    Contiguous(core::slice::ChunksExact<'a, T>),
+    RowPointers(I),
+}
+
+#[cfg(feature = "_internal_c_ffi")]
+impl<'a, T, I: Iterator<Item = &'a [T]>> Iterator for RowBitmapIter<'a, T, I> {
+    type Item = &'a [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Contiguous(iter) => iter.next(),
+            Self::RowPointers(iter) => iter.next(),
+        }
+    }
+}
+
+#[cfg(feature = "_internal_c_ffi")]
 enum MutCow<'a, T: ?Sized> {
     Owned(Box<T>),
     #[allow(dead_code)]
@@ -177,6 +256,7 @@ enum MutCow<'a, T: ?Sized> {
     Borrowed(&'a mut T),
 }
 
+#[cfg(feature = "_internal_c_ffi")]
 impl<T: ?Sized> MutCow<'_, T> {
     #[must_use]
     pub fn borrow_mut(&mut self) -> &mut T {
@@ -190,15 +270,8 @@ impl<T: ?Sized> MutCow<'_, T> {
 impl<'a, T: Sync + Send + Copy + 'static> RowBitmapMut<'a, T> {
     #[inline]
     #[must_use]
-    pub fn new_contiguous(data: &mut [T], width: usize) -> Self {
-        Self {
-            rows: MutCow::Owned(
-                data.chunks_exact_mut(width)
-                    .map(|r| PointerMut(r.as_mut_ptr()))
-                    .collect(),
-            ),
-            width,
-        }
+    pub fn new_contiguous(data: &'a mut [T], width: usize) -> Self {
+        Self::Contiguous { data, width }
     }
 
     /// Inner pointers must be valid for `'a` too, and at least `width` large each
@@ -206,35 +279,138 @@ impl<'a, T: Sync + Send + Copy + 'static> RowBitmapMut<'a, T> {
     #[cfg(feature = "_internal_c_ffi")]
     #[must_use]
     pub unsafe fn new(rows: &'a mut [*mut T], width: usize) -> Self {
-        Self {
+        Self::RowPointers {
             rows: MutCow::Borrowed(&mut *(rows as *mut [*mut T] as *mut [PointerMut<T>])),
             width,
         }
     }
 
+    #[cfg(not(feature = "_internal_c_ffi"))]
     pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut [T]> + Send {
-        let width = self.width;
-        self.rows
-            .borrow_mut()
-            .iter()
-            .map(move |row| unsafe { slice::from_raw_parts_mut(row.0, width) })
+        match self {
+            Self::Contiguous { data, width } => data.chunks_exact_mut(*width),
+        }
     }
 
+    #[cfg(feature = "_internal_c_ffi")]
+    pub fn rows_mut(&mut self) -> impl Iterator<Item = &mut [T]> + Send {
+        match self {
+            Self::Contiguous { data, width } => {
+                RowBitmapMutIter::Contiguous(data.chunks_exact_mut(*width))
+            }
+            Self::RowPointers { rows, width } => {
+                let width = *width;
+                RowBitmapMutIter::RowPointers(
+                    rows.borrow_mut()
+                        .iter()
+                        .map(move |row| unsafe { slice::from_raw_parts_mut(row.0, width) }),
+                )
+            }
+        }
+    }
+
+    #[cfg(not(feature = "_internal_c_ffi"))]
     pub(crate) fn chunks(
         &mut self,
         chunk_size: usize,
     ) -> impl Iterator<Item = RowBitmapMut<'_, T>> {
-        self.rows
-            .borrow_mut()
-            .chunks_mut(chunk_size)
-            .map(|chunk| RowBitmapMut {
-                width: self.width,
-                rows: MutCow::Borrowed(chunk),
-            })
+        match self {
+            Self::Contiguous { data, width } => {
+                let row_size = *width;
+                let chunk_bytes = chunk_size * row_size;
+                data.chunks_mut(chunk_bytes)
+                    .map(move |chunk| RowBitmapMut::Contiguous {
+                        data: chunk,
+                        width: row_size,
+                    })
+            }
+        }
+    }
+
+    #[cfg(feature = "_internal_c_ffi")]
+    pub(crate) fn chunks(
+        &mut self,
+        chunk_size: usize,
+    ) -> impl Iterator<Item = RowBitmapMut<'_, T>> {
+        match self {
+            Self::Contiguous { data, width } => {
+                let row_size = *width;
+                let chunk_bytes = chunk_size * row_size;
+                RowBitmapMutChunks::Contiguous {
+                    iter: data.chunks_mut(chunk_bytes),
+                    width: row_size,
+                }
+            }
+            Self::RowPointers { rows, width } => RowBitmapMutChunks::RowPointers {
+                iter: rows.borrow_mut().chunks_mut(chunk_size),
+                width: *width,
+            },
+        }
     }
 
     #[must_use]
     pub(crate) fn len(&mut self) -> usize {
-        self.rows.borrow_mut().len()
+        match self {
+            Self::Contiguous { data, width } => data.len() / *width,
+            #[cfg(feature = "_internal_c_ffi")]
+            Self::RowPointers { rows, .. } => rows.borrow_mut().len(),
+        }
+    }
+}
+
+#[cfg(feature = "_internal_c_ffi")]
+enum RowBitmapMutIter<'a, T, I: Iterator<Item = &'a mut [T]>> {
+    Contiguous(core::slice::ChunksExactMut<'a, T>),
+    RowPointers(I),
+}
+
+#[cfg(feature = "_internal_c_ffi")]
+impl<'a, T: Send, I: Iterator<Item = &'a mut [T]> + Send> Iterator for RowBitmapMutIter<'a, T, I> {
+    type Item = &'a mut [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Contiguous(iter) => iter.next(),
+            Self::RowPointers(iter) => iter.next(),
+        }
+    }
+}
+
+// Safe: ChunksExactMut is Send when T is Send
+#[cfg(feature = "_internal_c_ffi")]
+unsafe impl<'a, T: Send, I: Iterator<Item = &'a mut [T]> + Send> Send
+    for RowBitmapMutIter<'a, T, I>
+{
+}
+
+#[cfg(feature = "_internal_c_ffi")]
+enum RowBitmapMutChunks<'a, T> {
+    Contiguous {
+        iter: core::slice::ChunksMut<'a, T>,
+        width: usize,
+    },
+    RowPointers {
+        iter: core::slice::ChunksMut<'a, PointerMut<T>>,
+        width: usize,
+    },
+}
+
+#[cfg(feature = "_internal_c_ffi")]
+impl<'a, T: Sync + Send + Copy + 'static> Iterator for RowBitmapMutChunks<'a, T> {
+    type Item = RowBitmapMut<'a, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Contiguous { iter, width } => iter.next().map(|chunk| RowBitmapMut::Contiguous {
+                data: chunk,
+                width: *width,
+            }),
+            Self::RowPointers { iter, width } => {
+                iter.next().map(|chunk| RowBitmapMut::RowPointers {
+                    width: *width,
+                    rows: MutCow::Borrowed(chunk),
+                })
+            }
+        }
     }
 }

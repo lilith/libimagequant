@@ -29,6 +29,7 @@ pub(crate) struct Remapped {
 }
 
 #[inline(never)]
+#[allow(unsafe_code)]
 pub(crate) fn remap_to_palette<'x, 'b: 'x>(
     px: &mut DynamicRows,
     background: Option<&mut Image<'_>>,
@@ -139,7 +140,7 @@ pub(crate) fn remap_to_palette<'x, 'b: 'x>(
     }
 
     let remapping_error = remapping_error / f64::from(px.width * px.height);
-    Ok((remapping_error, unsafe { output_pixels.assume_init() }))
+    Ok((remapping_error, output_pixels.assume_init()))
 }
 
 fn get_dithered_pixel(
@@ -190,6 +191,7 @@ fn get_dithered_pixel(
 ///
 ///  If `output_image_is_remapped` is true, only pixels noticeably changed by error diffusion will be written to output image.
 #[inline(never)]
+#[allow(unsafe_code)]
 pub(crate) fn remap_to_palette_floyd(
     input_image: &mut Image,
     mut output_pixels: RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
@@ -352,6 +354,7 @@ pub(crate) fn remap_to_palette_floyd(
 }
 
 #[inline(never)]
+#[allow(unsafe_code)]
 fn dither_row(
     row_pixels: &[f_pixel],
     output_pixels_row: &mut [MaybeUninit<PalIndexRemap>],

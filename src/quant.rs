@@ -334,6 +334,7 @@ impl QuantizationResult {
     ///
     /// Returns the palette.
     #[inline]
+    #[allow(unsafe_code)]
     pub fn remap_into_vec(
         &mut self,
         image: &mut Image<'_>,
@@ -341,6 +342,7 @@ impl QuantizationResult {
     ) -> Result<Vec<RGBA>, Error> {
         let len = image.width() * image.height();
         // Capacity is essential here, as it creates uninitialized buffer
+        // SAFETY: remap_into initializes all elements, then we set_len
         unsafe {
             buf.clear();
             buf.try_reserve_exact(len)?;

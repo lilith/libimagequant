@@ -233,7 +233,7 @@ impl Histogram {
         }
 
         let px_int = if rgba.a != 0 {
-            self.posterize_mask() & unsafe { RGBAInt { rgba }.int }
+            self.posterize_mask() & rgba_to_u32(rgba)
         } else {
             0
         };
@@ -317,7 +317,7 @@ impl Histogram {
         // and temporarily 0 means this fixed max weight
         for &HashColor { rgba, .. } in &self.fixed_colors {
             let px_int = if rgba.a != 0 {
-                unsafe { RGBAInt { rgba }.int }
+                rgba_to_u32(rgba)
             } else {
                 0
             };
@@ -424,10 +424,9 @@ struct TempHistItem {
     cluster_index: u8,
 }
 
-#[repr(C)]
-union RGBAInt {
-    rgba: RGBA,
-    int: u32,
+#[inline(always)]
+fn rgba_to_u32(rgba: RGBA) -> u32 {
+    rgb::bytemuck::cast(rgba)
 }
 
 /// Clusters form initial boxes for quantization, to ensure extreme colors are better represented

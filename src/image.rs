@@ -82,6 +82,7 @@ impl<'pixels> Image<'pixels> {
     ///
     /// This function is marked as unsafe, because the callback function MUST initialize the entire row (call `write` on every `MaybeUninit` pixel).
     ///
+    #[allow(unsafe_code)]
     pub unsafe fn new_fn<F: 'pixels + Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync>(
         attr: &Attributes,
         convert_row_fn: F,
