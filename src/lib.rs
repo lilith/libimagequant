@@ -280,7 +280,37 @@ fn r_callback_test() {
             }
             called2.fetch_add(1, SeqCst);
         };
-        let mut img = Image::new_fn(&a, get_row, 123, 5, 0.).unwrap();
+        let mut img = Image::new_fn_init(&a, get_row, 123, 5, 0.).unwrap();
+        a.quantize(&mut img).unwrap()
+    };
+    let called = called.load(SeqCst);
+    assert!(called > 5 && called < 50);
+    assert_eq!(123, res.palette().len());
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn r_callback_test_legacy() {
+    use core::mem::MaybeUninit;
+    use core::sync::atomic::AtomicU16;
+    use core::sync::atomic::Ordering::SeqCst;
+    use std::sync::Arc;
+
+    let called = Arc::new(AtomicU16::new(0));
+    let called2 = called.clone();
+    let mut res = {
+        let a = new();
+        let get_row = move |output_row: &mut [MaybeUninit<RGBA>], y: usize| {
+            assert!((0..5).contains(&y));
+            assert_eq!(123, output_row.len());
+            for (n, out) in output_row.iter_mut().enumerate() {
+                let n = n as u8;
+                out.write(RGBA::new(n, n, n, n));
+            }
+            called2.fetch_add(1, SeqCst);
+        };
+        // SAFETY: callback initializes all pixels
+        let mut img = unsafe { Image::new_fn(&a, get_row, 123, 5, 0.).unwrap() };
         a.quantize(&mut img).unwrap()
     };
     let called = called.load(SeqCst);

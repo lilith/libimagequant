@@ -7,6 +7,7 @@ use crate::rows::{DynamicRows, PixelsSource};
 use crate::seacow::{RowBitmap, SeaCow};
 use crate::{PushInCapacity, LIQ_HIGH_MEMORY_LIMIT};
 use core::mem;
+use core::mem::MaybeUninit;
 use rgb::prelude::*;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
@@ -77,7 +78,39 @@ impl<'pixels> Image<'pixels> {
     /// The callback will be called multiple times per row. May be called from multiple threads at once.
     ///
     /// Use `0.` for gamma if the image is sRGB (most images are).
-    pub fn new_fn<F: 'pixels + Fn(&mut [RGBA], usize) + Send + Sync>(
+    ///
+    /// ## Safety
+    ///
+    /// This function is marked as unsafe, because the callback function MUST initialize the entire row (call `write` on every `MaybeUninit` pixel).
+    ///
+    /// Consider using [`new_fn_init`](Self::new_fn_init) instead, which is safe and takes an initialized slice.
+    #[allow(unsafe_code)]
+    pub unsafe fn new_fn<F: 'pixels + Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync>(
+        attr: &Attributes,
+        convert_row_fn: F,
+        width: usize,
+        height: usize,
+        gamma: f64,
+    ) -> Result<Self, Error> {
+        // Wrap the MaybeUninit callback to work with our initialized-slice internal API
+        let wrapper = move |row: &mut [RGBA], y: usize| {
+            // SAFETY: RGBA and MaybeUninit<RGBA> have the same layout.
+            // The callback will write to these locations, which is safe since memory is valid.
+            let uninit_row = &mut *(row as *mut [RGBA] as *mut [MaybeUninit<RGBA>]);
+            convert_row_fn(uninit_row, y);
+        };
+        Self::new_fn_init(attr, wrapper, width, height, gamma)
+    }
+
+    /// Generate rows on demand using a callback function (safe version).
+    ///
+    /// The callback function should be cheap (e.g. just byte-swap pixels). The parameters are: line of RGBA pixels (slice's len is equal to image width), and row number (0-indexed).
+    /// The callback will be called multiple times per row. May be called from multiple threads at once.
+    ///
+    /// The slice passed to the callback is pre-initialized with zeros, so you can safely write to any subset of pixels.
+    ///
+    /// Use `0.` for gamma if the image is sRGB (most images are).
+    pub fn new_fn_init<F: 'pixels + Fn(&mut [RGBA], usize) + Send + Sync>(
         attr: &Attributes,
         convert_row_fn: F,
         width: usize,
