@@ -78,7 +78,6 @@ pub(crate) struct DynamicRows<'pixels, 'rows> {
     pub(crate) gamma: f64,
 }
 
-#[allow(unsafe_code)]
 impl Clone for DynamicRows<'_, '_> {
     fn clone(&self) -> Self {
         Self {
@@ -181,7 +180,7 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 
     #[inline(always)]
-    #[allow(unsafe_code)]
+    #[cfg_attr(feature = "_internal_c_ffi", allow(unsafe_code))]
     fn row_rgba<'px>(&'px self, temp_row: &'px mut [RGBA], row: usize) -> &'px [RGBA] {
         match &self.pixels {
             PixelsSource::Contiguous {

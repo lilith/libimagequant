@@ -28,7 +28,6 @@ pub(crate) struct Remapped {
 }
 
 #[inline(never)]
-#[allow(unsafe_code)]
 pub(crate) fn remap_to_palette<'x, 'b: 'x>(
     px: &mut DynamicRows,
     background: Option<&mut Image<'_>>,
@@ -190,7 +189,6 @@ fn get_dithered_pixel(
 ///
 ///  If `output_image_is_remapped` is true, only pixels noticeably changed by error diffusion will be written to output image.
 #[inline(never)]
-#[allow(unsafe_code)]
 pub(crate) fn remap_to_palette_floyd(
     input_image: &mut Image,
     mut output_pixels: RowBitmapMut<'_, PalIndexRemap>,
@@ -353,7 +351,6 @@ pub(crate) fn remap_to_palette_floyd(
 }
 
 #[inline(never)]
-#[allow(unsafe_code)]
 fn dither_row(
     row_pixels: &[f_pixel],
     output_pixels_row: &mut [PalIndexRemap],
