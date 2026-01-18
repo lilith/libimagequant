@@ -52,6 +52,11 @@ hashbrown = { version = "0.15.4", optional = true, default-features = false }
 
 [dev-dependencies]
 lodepng = "3.10"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "simd_bench"
+harness = false
 
 [workspace]
 members = ["imagequant-sys", "imagequant-sys/c_test"]

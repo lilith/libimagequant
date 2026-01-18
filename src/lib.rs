@@ -65,6 +65,14 @@ pub mod capi;
 use core::cmp::Ordering;
 
 pub use attr::{Attributes, ControlFlow};
+
+#[doc(hidden)]
+pub mod _bench {
+    //! Internal benchmarking helpers - not part of public API
+    pub use crate::blur::{
+        liq_max3, liq_max3_scalar_ref, liq_min3, liq_min3_scalar_ref,
+    };
+}
 pub use error::Error;
 pub use hist::{Histogram, HistogramEntry};
 pub use image::Image;
