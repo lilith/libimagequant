@@ -11,7 +11,7 @@ use crate::rows::RowCallback;
 use crate::seacow::{Pointer, RowBitmapMut, SeaCow};
 use crate::{Attributes, Error, Image, QuantizationResult, RGBA};
 use core::ffi::c_void;
-use core::mem::{self, MaybeUninit};
+use core::mem;
 
 pub const LIQ_VERSION: u32 = 40202;
 
@@ -88,10 +88,10 @@ pub unsafe fn liq_image_create_custom_impl<'rows>(
     .ok()
 }
 
-pub unsafe fn liq_write_remapped_image_impl(
+pub fn liq_write_remapped_image_impl(
     result: &mut QuantizationResult,
     input_image: &mut Image,
-    buffer_bytes: &mut [MaybeUninit<u8>],
+    buffer_bytes: &mut [u8],
 ) -> Result<(), Error> {
     let rows = RowBitmapMut::new_contiguous(buffer_bytes, input_image.width());
     result.write_remapped_image_rows_internal(input_image, rows)
@@ -100,7 +100,7 @@ pub unsafe fn liq_write_remapped_image_impl(
 pub unsafe fn liq_write_remapped_image_rows_impl(
     result: &mut QuantizationResult,
     input_image: &mut Image,
-    rows: &mut [*mut MaybeUninit<u8>],
+    rows: &mut [*mut u8],
 ) -> Result<(), Error> {
     let rows = RowBitmapMut::new(rows, input_image.width());
     result.write_remapped_image_rows_internal(input_image, rows)

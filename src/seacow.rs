@@ -1,4 +1,3 @@
-use core::mem::MaybeUninit;
 #[cfg(feature = "_internal_c_ffi")]
 use core::slice;
 
@@ -166,36 +165,24 @@ pub(crate) enum RowBitmapMut<'a, T> {
     },
 }
 
-impl<T> RowBitmapMut<'_, MaybeUninit<T>> {
-    /// Convert MaybeUninit bitmap to initialized bitmap
-    ///
-    /// # Safety
-    /// All elements must have been initialized
+impl<T> RowBitmapMut<'_, T> {
+    /// Convert mutable bitmap to read-only bitmap view
     #[inline]
-    #[allow(unsafe_code)]
-    pub(crate) fn assume_init<'maybeowned>(
-        &'maybeowned mut self,
-    ) -> RowBitmap<'maybeowned, T> {
+    pub(crate) fn as_init<'maybeowned>(&'maybeowned mut self) -> RowBitmap<'maybeowned, T> {
         match self {
-            Self::Contiguous { data, width } => {
-                // SAFETY: MaybeUninit<T> and T have the same layout
-                // Caller guarantees all elements are initialized
-                let initialized: &[T] = unsafe {
-                    &*((*data) as *const [MaybeUninit<T>] as *const [T])
-                };
-                RowBitmap::Contiguous {
-                    data: initialized,
-                    width: *width,
-                }
-            }
+            Self::Contiguous { data, width } => RowBitmap::Contiguous {
+                data,
+                width: *width,
+            },
             #[cfg(feature = "_internal_c_ffi")]
-            Self::RowPointers { rows, width } => {
-                #[allow(clippy::transmute_ptr_to_ptr)]
+            Self::RowPointers { rows, width } =>
+            {
+                #[allow(clippy::transmute_ptr_to_ptr, unsafe_code)]
                 RowBitmap::RowPointers {
                     width: *width,
                     rows: unsafe {
                         core::mem::transmute::<
-                            &'maybeowned [PointerMut<MaybeUninit<T>>],
+                            &'maybeowned [PointerMut<T>],
                             &'maybeowned [Pointer<T>],
                         >(rows.borrow_mut())
                     },

@@ -1,6 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, Throughput, BenchmarkId};
-use imagequant::*;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use imagequant::_bench::{liq_max3, liq_max3_scalar_ref, liq_min3, liq_min3_scalar_ref};
+use imagequant::*;
 
 fn generate_test_image(width: usize, height: usize) -> Vec<RGBA> {
     (0..width * height)
@@ -27,7 +27,9 @@ fn bench_quantize(c: &mut Criterion) {
             b.iter(|| {
                 let mut attr = Attributes::new();
                 attr.set_speed(5).unwrap();
-                let mut img = attr.new_image(black_box(&pixels[..]), width, height, 0.0).unwrap();
+                let mut img = attr
+                    .new_image(black_box(&pixels[..]), width, height, 0.0)
+                    .unwrap();
                 attr.quantize(black_box(&mut img)).unwrap()
             })
         });
@@ -48,7 +50,9 @@ fn bench_quantize_speed_levels(c: &mut Criterion) {
             b.iter(|| {
                 let mut attr = Attributes::new();
                 attr.set_speed(speed).unwrap();
-                let mut img = attr.new_image(black_box(&pixels[..]), width, height, 0.0).unwrap();
+                let mut img = attr
+                    .new_image(black_box(&pixels[..]), width, height, 0.0)
+                    .unwrap();
                 attr.quantize(black_box(&mut img)).unwrap()
             })
         });
@@ -75,17 +79,13 @@ fn bench_remap(c: &mut Criterion) {
     group.bench_function("no_dither", |b| {
         res.set_dithering_level(0.0).unwrap();
         let mut img = attr.new_image(&pixels[..], width, height, 0.0).unwrap();
-        b.iter(|| {
-            res.remapped(black_box(&mut img)).unwrap()
-        })
+        b.iter(|| res.remapped(black_box(&mut img)).unwrap())
     });
 
     group.bench_function("dither_1.0", |b| {
         res.set_dithering_level(1.0).unwrap();
         let mut img = attr.new_image(&pixels[..], width, height, 0.0).unwrap();
-        b.iter(|| {
-            res.remapped(black_box(&mut img)).unwrap()
-        })
+        b.iter(|| res.remapped(black_box(&mut img)).unwrap())
     });
 
     group.finish();
@@ -102,7 +102,9 @@ fn bench_histogram(c: &mut Criterion) {
         group.bench_function(format!("{width}x{height}"), |b| {
             b.iter(|| {
                 let attr = Attributes::new();
-                let mut img = attr.new_image(black_box(&pixels[..]), width, height, 0.0).unwrap();
+                let mut img = attr
+                    .new_image(black_box(&pixels[..]), width, height, 0.0)
+                    .unwrap();
                 let mut hist = Histogram::new(&attr);
                 hist.add_image(&attr, black_box(&mut img)).unwrap();
                 hist
@@ -165,5 +167,12 @@ fn bench_blur_simd_vs_scalar(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_quantize, bench_quantize_speed_levels, bench_remap, bench_histogram, bench_blur_simd_vs_scalar);
+criterion_group!(
+    benches,
+    bench_quantize,
+    bench_quantize_speed_levels,
+    bench_remap,
+    bench_histogram,
+    bench_blur_simd_vs_scalar
+);
 criterion_main!(benches);

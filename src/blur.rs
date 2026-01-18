@@ -116,7 +116,10 @@ mod tests {
                 liq_max3(&src, &mut dst1, width, height);
                 liq_max3_scalar_ref(&src, &mut dst2, width, height);
 
-                assert_eq!(dst1, dst2, "max3 mismatch at width={width}, height={height}");
+                assert_eq!(
+                    dst1, dst2,
+                    "max3 mismatch at width={width}, height={height}"
+                );
             }
         }
     }
@@ -134,7 +137,10 @@ mod tests {
                 liq_min3(&src, &mut dst1, width, height);
                 liq_min3_scalar_ref(&src, &mut dst2, width, height);
 
-                assert_eq!(dst1, dst2, "min3 mismatch at width={width}, height={height}");
+                assert_eq!(
+                    dst1, dst2,
+                    "min3 mismatch at width={width}, height={height}"
+                );
             }
         }
     }

@@ -9,6 +9,8 @@
 #![deny(missing_docs)]
 #![allow(clippy::bool_to_int_with_if)]
 #![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
 #![allow(clippy::doc_markdown)]
 #![allow(clippy::if_not_else)]
 #![allow(clippy::inline_always)]
@@ -70,9 +72,7 @@ pub use attr::{Attributes, ControlFlow};
 #[doc(hidden)]
 pub mod _bench {
     //! Internal benchmarking helpers - not part of public API
-    pub use crate::blur::{
-        liq_max3, liq_max3_scalar_ref, liq_min3, liq_min3_scalar_ref,
-    };
+    pub use crate::blur::{liq_max3, liq_max3_scalar_ref, liq_min3, liq_min3_scalar_ref};
 }
 pub use error::Error;
 pub use hist::{Histogram, HistogramEntry};
@@ -262,9 +262,7 @@ fn thread() {
 }
 
 #[test]
-#[allow(unsafe_code)]
 fn r_callback_test() {
-    use core::mem::MaybeUninit;
     use core::sync::atomic::AtomicU16;
     use core::sync::atomic::Ordering::SeqCst;
     use std::sync::Arc;
@@ -273,16 +271,16 @@ fn r_callback_test() {
     let called2 = called.clone();
     let mut res = {
         let a = new();
-        let get_row = move |output_row: &mut [MaybeUninit<RGBA>], y: usize| {
+        let get_row = move |output_row: &mut [RGBA], y: usize| {
             assert!((0..5).contains(&y));
             assert_eq!(123, output_row.len());
             for (n, out) in output_row.iter_mut().enumerate() {
                 let n = n as u8;
-                out.write(RGBA::new(n, n, n, n));
+                *out = RGBA::new(n, n, n, n);
             }
             called2.fetch_add(1, SeqCst);
         };
-        let mut img = unsafe { Image::new_fn(&a, get_row, 123, 5, 0.).unwrap() };
+        let mut img = Image::new_fn(&a, get_row, 123, 5, 0.).unwrap();
         a.quantize(&mut img).unwrap()
     };
     let called = called.load(SeqCst);

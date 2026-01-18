@@ -59,12 +59,8 @@ pub type liq_log_flush_callback_function =
     unsafe extern "C" fn(liq: &liq_attr, user_info: AnySyncSendPtr);
 pub type liq_progress_callback_function =
     unsafe extern "C" fn(progress_percent: f32, user_info: AnySyncSendPtr) -> c_int;
-pub type liq_image_get_rgba_row_callback = unsafe extern "C" fn(
-    row_out: *mut MaybeUninit<RGBA>,
-    row: c_int,
-    width: c_int,
-    user_info: AnySyncSendPtr,
-);
+pub type liq_image_get_rgba_row_callback =
+    unsafe extern "C" fn(row_out: *mut RGBA, row: c_int, width: c_int, user_info: AnySyncSendPtr);
 
 bitflags::bitflags! {
     #[repr(C)]
@@ -400,7 +396,7 @@ pub extern "C" fn liq_quantize_image(
 pub unsafe extern "C" fn liq_write_remapped_image(
     result: &mut liq_result,
     input_image: &mut liq_image,
-    buffer_bytes: *mut MaybeUninit<u8>,
+    buffer_bytes: *mut u8,
     buffer_size: usize,
 ) -> liq_error {
     if bad_object!(result, LIQ_RESULT_MAGIC) || bad_object!(input_image, LIQ_IMAGE_MAGIC) {
@@ -428,7 +424,7 @@ pub unsafe extern "C" fn liq_write_remapped_image(
 pub unsafe extern "C" fn liq_write_remapped_image_rows(
     result: &mut liq_result,
     input_image: &mut liq_image,
-    row_pointers: *mut *mut MaybeUninit<u8>,
+    row_pointers: *mut *mut u8,
 ) -> liq_error {
     if bad_object!(result, LIQ_RESULT_MAGIC) || bad_object!(input_image, LIQ_IMAGE_MAGIC) {
         return Error::InvalidPointer;
@@ -815,7 +811,7 @@ pub unsafe extern "C" fn liq_image_create_custom(
     height: c_uint,
     gamma: f64,
 ) -> Option<Box<liq_image<'static>>> {
-    let cb: Box<dyn Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync> =
+    let cb: Box<dyn Fn(&mut [RGBA], usize) + Send + Sync> =
         Box::new(move |row, y| row_callback(row.as_mut_ptr(), y as _, row.len() as _, user_info));
     liq_image_create_custom_impl(&attr.inner, cb, width as _, height as _, gamma).map(
         move |inner| {
@@ -945,7 +941,7 @@ pub extern "C" fn liq_histogram_add_image(
 #[inline(never)]
 pub unsafe extern "Rust" fn liq_executing_user_callback(
     callback: liq_image_get_rgba_row_callback,
-    temp_row: &mut [MaybeUninit<liq_color>],
+    temp_row: &mut [liq_color],
     row: usize,
     user_info: AnySyncSendPtr,
 ) {
@@ -1051,7 +1047,7 @@ fn c_callback_test_c() {
     let mut res = unsafe {
         let mut a = liq_attr_create().unwrap();
         unsafe extern "C" fn get_row(
-            output_row: *mut MaybeUninit<RGBA>,
+            output_row: *mut RGBA,
             y: c_int,
             width: c_int,
             user_data: AnySyncSendPtr,
@@ -1060,7 +1056,7 @@ fn c_callback_test_c() {
             assert_eq!(123, width);
             for i in 0..width as isize {
                 let n = i as u8;
-                (*output_row.offset(i)).write(RGBA::new(n, n, n, n));
+                *output_row.offset(i) = RGBA::new(n, n, n, n);
             }
             let user_data = user_data.0.cast::<i32>();
             *user_data += 1;

@@ -316,11 +316,7 @@ impl Histogram {
         // Fixed colors will be put into normal hashmap, but with very high weight,
         // and temporarily 0 means this fixed max weight
         for &HashColor { rgba, .. } in &self.fixed_colors {
-            let px_int = if rgba.a != 0 {
-                rgba_to_u32(rgba)
-            } else {
-                0
-            };
+            let px_int = if rgba.a != 0 { rgba_to_u32(rgba) } else { 0 };
 
             self.hashmap.insert(px_int, (0, rgba));
         }

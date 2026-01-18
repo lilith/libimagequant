@@ -4,14 +4,16 @@ use crate::pal::{f_pixel, gamma_lut, RGBA};
 use crate::seacow::Pointer;
 use crate::seacow::SeaCow;
 use crate::LIQ_HIGH_MEMORY_LIMIT;
-use core::mem::{size_of, MaybeUninit};
+use core::mem::size_of;
 #[cfg(feature = "_internal_c_ffi")]
 use core::slice;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use std::{boxed::Box, vec::Vec};
 
-pub(crate) type RowCallback<'a> = dyn Fn(&mut [MaybeUninit<RGBA>], usize) + Send + Sync + 'a;
+/// Callback for generating pixel rows on demand.
+/// The callback receives a pre-initialized buffer and row index.
+pub(crate) type RowCallback<'a> = dyn Fn(&mut [RGBA], usize) + Send + Sync + 'a;
 
 pub(crate) enum PixelsSource<'pixels, 'rows> {
     /// Pure Rust: contiguous memory with stride, no raw pointers needed
@@ -84,7 +86,11 @@ impl Clone for DynamicRows<'_, '_> {
             height: self.height,
             f_pixels: self.f_pixels.clone(),
             pixels: match &self.pixels {
-                PixelsSource::Contiguous { pixels, stride, row_offsets } => PixelsSource::Contiguous {
+                PixelsSource::Contiguous {
+                    pixels,
+                    stride,
+                    row_offsets,
+                } => PixelsSource::Contiguous {
                     pixels: pixels.clone(),
                     stride: *stride,
                     row_offsets: row_offsets.clone(),
@@ -96,14 +102,10 @@ impl Clone for DynamicRows<'_, '_> {
                 },
                 PixelsSource::Callback(_) => {
                     let area = self.width as usize * self.height as usize;
-                    let mut out = Vec::with_capacity(area);
-                    let out_rows =
-                        out.spare_capacity_mut()[..area].chunks_exact_mut(self.width as usize);
-                    for (i, row) in out_rows.enumerate() {
+                    // Zero-initialize then overwrite via callback
+                    let mut out = vec![RGBA::default(); area];
+                    for (i, row) in out.chunks_exact_mut(self.width as usize).enumerate() {
                         self.row_rgba(row, i);
-                    }
-                    unsafe {
-                        out.set_len(area);
                     }
                     let pixels = SeaCow::boxed(out.into_boxed_slice());
                     PixelsSource::for_pixels(pixels, self.width, self.height, self.width).unwrap()
@@ -116,16 +118,12 @@ impl Clone for DynamicRows<'_, '_> {
 
 pub(crate) struct DynamicRowsIter<'parent, 'pixels, 'rows> {
     px: &'parent DynamicRows<'pixels, 'rows>,
-    temp_f_row: Option<Box<[MaybeUninit<f_pixel>]>>,
+    temp_f_row: Option<Box<[f_pixel]>>,
 }
 
 impl DynamicRowsIter<'_, '_, '_> {
     #[must_use]
-    pub fn row_f<'px>(
-        &'px mut self,
-        temp_row: &mut [MaybeUninit<RGBA>],
-        row: usize,
-    ) -> &'px [f_pixel] {
+    pub fn row_f<'px>(&'px mut self, temp_row: &mut [RGBA], row: usize) -> &'px [f_pixel] {
         debug_assert_eq!(temp_row.len(), self.px.width as usize);
         if let Some(pixels) = self.px.f_pixels.as_ref() {
             let start = self.px.width as usize * row;
@@ -144,8 +142,8 @@ impl DynamicRowsIter<'_, '_, '_> {
     #[must_use]
     pub fn row_f_shared<'px>(
         &'px self,
-        temp_row: &mut [MaybeUninit<RGBA>],
-        temp_row_f: &'px mut [MaybeUninit<f_pixel>],
+        temp_row: &mut [RGBA],
+        temp_row_f: &'px mut [f_pixel],
         row: usize,
     ) -> &'px [f_pixel] {
         if let Some(pixels) = self.px.f_pixels.as_ref() {
@@ -159,11 +157,7 @@ impl DynamicRowsIter<'_, '_, '_> {
     }
 
     #[must_use]
-    pub fn row_rgba<'px>(
-        &'px self,
-        temp_row: &'px mut [MaybeUninit<RGBA>],
-        row: usize,
-    ) -> &'px [RGBA] {
+    pub fn row_rgba<'px>(&'px self, temp_row: &'px mut [RGBA], row: usize) -> &'px [RGBA] {
         self.px.row_rgba(temp_row, row)
     }
 }
@@ -188,9 +182,13 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
 
     #[inline(always)]
     #[allow(unsafe_code)]
-    fn row_rgba<'px>(&'px self, temp_row: &'px mut [MaybeUninit<RGBA>], row: usize) -> &'px [RGBA] {
+    fn row_rgba<'px>(&'px self, temp_row: &'px mut [RGBA], row: usize) -> &'px [RGBA] {
         match &self.pixels {
-            PixelsSource::Contiguous { pixels, row_offsets, .. } => {
+            PixelsSource::Contiguous {
+                pixels,
+                row_offsets,
+                ..
+            } => {
                 let slice = pixels.as_slice();
                 let width = self.width();
                 // Use precomputed offset - just array index, no multiply
@@ -206,24 +204,21 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
             },
             PixelsSource::Callback(cb) => {
                 cb(temp_row, row);
-                // cb needs to be marked as unsafe, since it's responsible for initialization :(
-                unsafe { slice_assume_init_mut(temp_row) }
+                temp_row
             }
         }
     }
 
-    #[allow(unsafe_code)]
     fn convert_row_to_f<'f>(
-        row_f_pixels: &'f mut [MaybeUninit<f_pixel>],
+        row_f_pixels: &'f mut [f_pixel],
         row_pixels: &[RGBA],
         gamma_lut: &[f32; 256],
     ) -> &'f mut [f_pixel] {
         assert_eq!(row_f_pixels.len(), row_pixels.len());
         for (dst, src) in row_f_pixels.iter_mut().zip(row_pixels) {
-            dst.write(f_pixel::from_rgba(gamma_lut, *src));
+            *dst = f_pixel::from_rgba(gamma_lut, *src);
         }
-        // SAFETY: All elements just initialized above
-        unsafe { slice_assume_init_mut(row_f_pixels) }
+        row_f_pixels
     }
 
     #[must_use]
@@ -232,17 +227,16 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 
     #[inline]
-    fn temp_f_row_for_iter(&self) -> Result<Option<Box<[MaybeUninit<f_pixel>]>>, Error> {
+    fn temp_f_row_for_iter(&self) -> Result<Option<Box<[f_pixel]>>, Error> {
         if self.f_pixels.is_some() {
             return Ok(None);
         }
         Ok(Some(temp_buf(self.width())?))
     }
 
-    #[allow(unsafe_code)]
     pub fn prepare_iter(
         &mut self,
-        temp_row: &mut [MaybeUninit<RGBA>],
+        temp_row: &mut [RGBA],
         allow_steamed: bool,
     ) -> Result<(), Error> {
         debug_assert_eq!(temp_row.len(), self.width as _);
@@ -258,15 +252,14 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
             let row_pixels = self.row_rgba(temp_row, row);
             Self::convert_row_to_f(f_row, row_pixels, &lut);
         }
-        // SAFETY: All elements initialized by convert_row_to_f above
-        self.f_pixels = Some(unsafe { box_assume_init(f_pixels) });
+        self.f_pixels = Some(f_pixels);
         Ok(())
     }
 
     #[inline]
     pub fn rows_iter(
         &mut self,
-        temp_row: &mut [MaybeUninit<RGBA>],
+        temp_row: &mut [RGBA],
     ) -> Result<DynamicRowsIter<'_, 'pixels, 'rows>, Error> {
         self.prepare_iter(temp_row, true)?;
         Ok(DynamicRowsIter {
@@ -373,12 +366,11 @@ impl<'pixels, 'rows> DynamicRows<'pixels, 'rows> {
     }
 }
 
-#[allow(unsafe_code)]
-pub(crate) fn temp_buf<T>(len: usize) -> Result<Box<[MaybeUninit<T>]>, Error> {
+/// Allocate a zero-initialized temporary buffer.
+pub(crate) fn temp_buf<T: Default + Clone>(len: usize) -> Result<Box<[T]>, Error> {
     let mut v = Vec::new();
     v.try_reserve_exact(len)?;
-    // SAFETY: MaybeUninit doesn't require initialization
-    unsafe { v.set_len(len) };
+    v.resize(len, T::default());
     Ok(v.into_boxed_slice())
 }
 
@@ -390,18 +382,4 @@ fn send() {
     is_sync::<DynamicRows>();
     is_send::<PixelsSource>();
     is_sync::<PixelsSource>();
-}
-
-/// SAFETY: All elements must have been initialized
-#[inline(always)]
-#[allow(unsafe_code)]
-unsafe fn box_assume_init<T>(s: Box<[MaybeUninit<T>]>) -> Box<[T]> {
-    core::mem::transmute(s)
-}
-
-/// SAFETY: All elements must have been initialized
-#[inline(always)]
-#[allow(unsafe_code)]
-unsafe fn slice_assume_init_mut<T>(s: &mut [MaybeUninit<T>]) -> &mut [T] {
-    &mut *(s as *mut [MaybeUninit<T>] as *mut [T])
 }

@@ -9,7 +9,6 @@ use crate::rows::{temp_buf, DynamicRows};
 use crate::seacow::{RowBitmap, RowBitmapMut};
 use crate::CacheLineAlign;
 use core::cell::RefCell;
-use core::mem::MaybeUninit;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use crate::no_std_compat::*;
@@ -34,7 +33,7 @@ pub(crate) fn remap_to_palette<'x, 'b: 'x>(
     px: &mut DynamicRows,
     background: Option<&mut Image<'_>>,
     importance_map: Option<&[u8]>,
-    output_pixels: &'x mut RowBitmapMut<'b, MaybeUninit<PalIndexRemap>>,
+    output_pixels: &'x mut RowBitmapMut<'b, PalIndexRemap>,
     palette: &mut PalF,
 ) -> Result<(f64, RowBitmap<'x, PalIndexRemap>), Error> {
     let n = Nearest::new(palette)?;
@@ -114,12 +113,12 @@ pub(crate) fn remap_to_palette<'x, 'b: 'x>(
                     let bg_diff = bg.diff(inp);
                     if bg_diff <= diff {
                         remapping_error += f64::from(bg_diff);
-                        out.write(transparent_index);
+                        *out = transparent_index;
                         continue;
                     }
                 }
                 remapping_error += f64::from(diff);
-                out.write(matched);
+                *out = matched;
                 let importance = f32::from(importance_map.get(col).copied().unwrap_or(1));
                 kmeans.update_color(*inp, importance, matched as _);
             }
@@ -140,7 +139,7 @@ pub(crate) fn remap_to_palette<'x, 'b: 'x>(
     }
 
     let remapping_error = remapping_error / f64::from(px.width * px.height);
-    Ok((remapping_error, output_pixels.assume_init()))
+    Ok((remapping_error, output_pixels.as_init()))
 }
 
 fn get_dithered_pixel(
@@ -194,7 +193,7 @@ fn get_dithered_pixel(
 #[allow(unsafe_code)]
 pub(crate) fn remap_to_palette_floyd(
     input_image: &mut Image,
-    mut output_pixels: RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
+    mut output_pixels: RowBitmapMut<'_, PalIndexRemap>,
     palette: &PalF,
     quant: &QuantizationResult,
     max_dither_error: f32,
@@ -357,7 +356,7 @@ pub(crate) fn remap_to_palette_floyd(
 #[allow(unsafe_code)]
 fn dither_row(
     row_pixels: &[f_pixel],
-    output_pixels_row: &mut [MaybeUninit<PalIndexRemap>],
+    output_pixels_row: &mut [PalIndexRemap],
     width: u32,
     dither_map: &[u8],
     base_dithering_level: f32,
@@ -401,7 +400,7 @@ fn dither_row(
 
         let spx = get_dithered_pixel(dither_level, max_dither_error, thiserr[1], input_px);
         let guessed_match = if guess_from_remapped_pixels {
-            unsafe { output_pixels_row[col].assume_init() }
+            output_pixels_row[col]
         } else {
             last_match
         };
@@ -439,7 +438,7 @@ fn dither_row(
                 }
             }
         }
-        output_pixels_row[col].write(matched);
+        output_pixels_row[col] = matched;
         let mut err = spx.0 - output_px.0;
         // This prevents weird green pixels popping out of the blue (or red or black! ;)
         if err.r.mul_add(err.r, err.g * err.g) + err.b.mul_add(err.b, err.a * err.a)
@@ -465,7 +464,7 @@ fn dither_row(
 fn send() {
     fn is_send<T: Send>() {}
 
-    is_send::<RowBitmapMut<'_, MaybeUninit<u8>>>();
+    is_send::<RowBitmapMut<'_, u8>>();
 }
 
 #[test]

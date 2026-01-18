@@ -12,7 +12,6 @@ use crate::OrdFloat;
 use arrayvec::ArrayVec;
 use core::cmp::Reverse;
 use core::fmt;
-use core::mem::MaybeUninit;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use crate::no_std_compat::*;
@@ -91,7 +90,7 @@ impl QuantizationResult {
     pub fn optionally_prepare_for_dithering_with_background_set(
         &mut self,
         image: &mut Image<'_>,
-        output_buf: &mut [MaybeUninit<PalIndexRemap>],
+        output_buf: &mut [PalIndexRemap],
     ) -> Result<(), Error> {
         let mut output_pixels = RowBitmapMut::new_contiguous(output_buf, image.width());
         Self::optionally_generate_dither_map(
@@ -108,7 +107,7 @@ impl QuantizationResult {
     pub(crate) fn write_remapped_image_rows_internal(
         &mut self,
         image: &mut Image,
-        mut output_pixels: RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
+        mut output_pixels: RowBitmapMut<'_, PalIndexRemap>,
     ) -> Result<(), Error> {
         let progress_stage1 = if self.use_dither_map != DitherMapMode::None {
             20
@@ -187,7 +186,7 @@ impl QuantizationResult {
         use_dither_map: DitherMapMode,
         image: &mut Image<'_>,
         uses_background: bool,
-        output_pixels: &mut RowBitmapMut<'_, MaybeUninit<PalIndexRemap>>,
+        output_pixels: &mut RowBitmapMut<'_, PalIndexRemap>,
         palette: &mut PalF,
     ) -> Result<Option<f64>, Error> {
         let is_image_huge = (image.px.width * image.px.height) > 2000 * 2000;
@@ -334,21 +333,16 @@ impl QuantizationResult {
     ///
     /// Returns the palette.
     #[inline]
-    #[allow(unsafe_code)]
     pub fn remap_into_vec(
         &mut self,
         image: &mut Image<'_>,
         buf: &mut Vec<PalIndexRemap>,
     ) -> Result<Vec<RGBA>, Error> {
         let len = image.width() * image.height();
-        // Capacity is essential here, as it creates uninitialized buffer
-        // SAFETY: remap_into initializes all elements, then we set_len
-        unsafe {
-            buf.clear();
-            buf.try_reserve_exact(len)?;
-            self.remap_into(image, &mut buf.spare_capacity_mut()[..len])?;
-            buf.set_len(len);
-        }
+        buf.clear();
+        buf.try_reserve_exact(len)?;
+        buf.resize(len, 0);
+        self.remap_into(image, buf)?;
         Ok(self.palette_vec())
     }
 
@@ -364,7 +358,7 @@ impl QuantizationResult {
     pub fn remap_into(
         &mut self,
         image: &mut Image<'_>,
-        output_buf: &mut [MaybeUninit<PalIndexRemap>],
+        output_buf: &mut [PalIndexRemap],
     ) -> Result<(), Error> {
         let required_size = (image.width()) * (image.height());
         let output_buf = output_buf.get_mut(0..required_size).ok_or(BufferTooSmall)?;
