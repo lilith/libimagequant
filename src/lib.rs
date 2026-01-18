@@ -4,7 +4,7 @@
 //!
 //! See `examples/` directory for example code.
 #![cfg_attr(all(not(feature = "std"), feature = "no_std"), no_std)]
-#![cfg_attr(all(not(feature = "_internal_c_ffi"), not(feature = "no_std")), deny(unsafe_code))]
+#![cfg_attr(not(feature = "_internal_c_ffi"), deny(unsafe_code))]
 #![doc(html_logo_url = "https://pngquant.org/pngquant-logo.png")]
 #![deny(missing_docs)]
 #![allow(clippy::bool_to_int_with_if)]
@@ -461,13 +461,6 @@ pub(crate) mod no_std_compat {
     pub use std::format;
     pub use std::vec::Vec;
 
-    extern "C" {
-        fn pow(_: f64, _: f64) -> f64;
-        fn powf(_: f32, _: f32) -> f32;
-        fn sqrt(_: f64) -> f64;
-        fn sqrtf(_: f32) -> f32;
-    }
-
     pub(crate) trait NoMath: Sized {
         fn mul_add(self, mul: Self, add: Self) -> Self;
         fn powi(self, n: u32) -> Self;
@@ -477,33 +470,33 @@ pub(crate) mod no_std_compat {
 
     impl NoMath for f32 {
         fn mul_add(self, mul: Self, add: Self) -> Self {
-            self * mul + add
+            libm::fmaf(self, mul, add)
         }
         fn powi(self, n: u32) -> Self {
-            assert_eq!(n, 2);
+            debug_assert_eq!(n, 2);
             self * self
         }
         fn powf(self, e: Self) -> Self {
-            unsafe { powf(self, e) }
+            libm::powf(self, e)
         }
         fn sqrt(self) -> Self {
-            unsafe { sqrtf(self) }
+            libm::sqrtf(self)
         }
     }
 
     impl NoMath for f64 {
         fn mul_add(self, mul: Self, add: Self) -> Self {
-            self * mul + add
+            libm::fma(self, mul, add)
         }
         fn powi(self, n: u32) -> Self {
-            assert_eq!(n, 2);
+            debug_assert_eq!(n, 2);
             self * self
         }
         fn powf(self, e: Self) -> Self {
-            unsafe { pow(self, e) }
+            libm::pow(self, e)
         }
         fn sqrt(self) -> Self {
-            unsafe { sqrt(self) }
+            libm::sqrt(self)
         }
     }
 }
