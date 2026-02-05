@@ -34,12 +34,10 @@ pub fn summon_token() -> Option<()> {
 #[arcane]
 #[inline(always)]
 pub fn diff_simd(_token: Desktop64, a: &f_pixel, b: &f_pixel) -> f32 {
-    // Use bytemuck to safely cast ARGBF to [f32; 4]
-    let arr_a: [f32; 4] = rgb::bytemuck::cast(a.0);
-    let arr_b: [f32; 4] = rgb::bytemuck::cast(b.0);
-
-    let px = f32x4::from_array(_token, arr_a);
-    let py = f32x4::from_array(_token, arr_b);
+    // Use bytemuck::cast_ref to get &[f32; 4] without copying
+    // Then use f32x4::load for proper _mm_loadu_ps
+    let px = f32x4::load(_token, rgb::bytemuck::cast_ref(&a.0));
+    let py = f32x4::load(_token, rgb::bytemuck::cast_ref(&b.0));
 
     let alpha_diff = f32x4::splat(_token, b.a - a.a);
     let onblack = px - py;

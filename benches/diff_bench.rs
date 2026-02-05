@@ -54,8 +54,8 @@ mod archmage_impl {
     #[arcane]
     #[inline(always)]
     pub fn diff_archmage(_token: Desktop64, a: &[f32; 4], b: &[f32; 4]) -> f32 {
-        let px = f32x4::from_array(_token, *a);
-        let py = f32x4::from_array(_token, *b);
+        let px = f32x4::load(_token, a);
+        let py = f32x4::load(_token, b);
         let alpha_diff = f32x4::splat(_token, b[0] - a[0]);
         let onblack = px - py;
         let onwhite = onblack + alpha_diff;
@@ -64,13 +64,27 @@ mod archmage_impl {
         arr[1] + arr[2] + arr[3]
     }
 
-    /// Batch processing with archmage - single token summon for entire batch
+    /// Batch processing with archmage - entire loop inside #[arcane] for proper inlining
+    #[arcane]
+    fn diff_batch_inner(_token: Desktop64, pixels_a: &[[f32; 4]], pixels_b: &[[f32; 4]]) -> f32 {
+        pixels_a.iter().zip(pixels_b).map(|(a, b)| {
+            let px = f32x4::load(_token, a);
+            let py = f32x4::load(_token, b);
+            let alpha_diff = f32x4::splat(_token, b[0] - a[0]);
+            let onblack = px - py;
+            let onwhite = onblack + alpha_diff;
+            let max_sq = (onblack * onblack).max(onwhite * onwhite);
+            let arr = max_sq.to_array();
+            arr[1] + arr[2] + arr[3]
+        }).sum()
+    }
+
     #[inline(never)]
     pub fn diff_batch_archmage(pixels_a: &[[f32; 4]], pixels_b: &[[f32; 4]]) -> f32 {
         let Some(token) = Desktop64::summon() else {
             return pixels_a.iter().zip(pixels_b).map(|(a, b)| super::diff_scalar(a, b)).sum();
         };
-        pixels_a.iter().zip(pixels_b).map(|(a, b)| diff_archmage(token, a, b)).sum()
+        diff_batch_inner(token, pixels_a, pixels_b)
     }
 
     /// Per-call dispatch (current library behavior)
@@ -165,11 +179,28 @@ mod raw_impl {
         arr[1] + arr[2] + arr[3]
     }
 
+    /// Batch with entire loop in #[arcane] for proper inlining
+    #[arcane]
+    fn diff_batch_inner(_token: Desktop64, pixels_a: &[[f32; 4]], pixels_b: &[[f32; 4]]) -> f32 {
+        pixels_a.iter().zip(pixels_b).map(|(a, b)| {
+            let pa = _mm_loadu_ps(a.as_ptr());
+            let pb = _mm_loadu_ps(b.as_ptr());
+            let alpha_diff = _mm_set1_ps(b[0] - a[0]);
+            let onblack = _mm_sub_ps(pa, pb);
+            let onwhite = _mm_add_ps(onblack, alpha_diff);
+            let sq_black = _mm_mul_ps(onblack, onblack);
+            let sq_white = _mm_mul_ps(onwhite, onwhite);
+            let max_sq = _mm_max_ps(sq_black, sq_white);
+            let arr: [f32; 4] = core::mem::transmute(max_sq);
+            arr[1] + arr[2] + arr[3]
+        }).sum()
+    }
+
     #[inline(never)]
     pub fn diff_batch_raw(pixels_a: &[[f32; 4]], pixels_b: &[[f32; 4]]) -> f32 {
         let Some(token) = Desktop64::summon() else {
             return pixels_a.iter().zip(pixels_b).map(|(a, b)| super::diff_scalar(a, b)).sum();
         };
-        pixels_a.iter().zip(pixels_b).map(|(a, b)| diff_raw(token, a, b)).sum()
+        diff_batch_inner(token, pixels_a, pixels_b)
     }
 }
