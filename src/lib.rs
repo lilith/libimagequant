@@ -42,6 +42,7 @@ mod quant;
 mod remap;
 mod rows;
 mod seacow;
+mod simd;
 
 #[cfg(not(feature = "threads"))]
 mod rayoff;

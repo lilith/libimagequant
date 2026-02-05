@@ -3,7 +3,7 @@ use arrayvec::ArrayVec;
 use core::iter;
 use core::ops::{Deref, DerefMut};
 use rgb::prelude::*;
-use wide::f32x4;
+use crate::simd;
 
 #[cfg(all(not(feature = "std"), feature = "no_std"))]
 use crate::no_std_compat::*;
@@ -32,25 +32,13 @@ const LIQ_WEIGHT_MSE: f64 = 0.45;
 pub struct f_pixel(pub ARGBF);
 
 impl f_pixel {
-    /// Compute perceptual color difference using portable SIMD.
+    /// Compute perceptual color difference.
     ///
     /// Computes max(onblack², onwhite²) for RGB channels and sums them,
     /// where onblack = self - other, onwhite = onblack + alpha_diff.
     #[inline(always)]
     pub fn diff(&self, other: &f_pixel) -> f32 {
-        // ARGBF and f32x4 are both Pod and same size/alignment
-        let px: f32x4 = rgb::bytemuck::cast(self.0);
-        let py: f32x4 = rgb::bytemuck::cast(other.0);
-
-        // alpha is at index 0 in ARGBF layout
-        let alpha_diff = f32x4::splat(other.0.a - self.0.a);
-        let onblack = px - py;
-        let onwhite = onblack + alpha_diff;
-        let max_sq = (onblack * onblack).max(onwhite * onwhite);
-
-        // Sum RGB channels (indices 1, 2, 3), skip alpha (index 0)
-        let arr: [f32; 4] = max_sq.into();
-        arr[1] + arr[2] + arr[3]
+        simd::diff(self, other)
     }
 
     /// Scalar reference implementation for verification
