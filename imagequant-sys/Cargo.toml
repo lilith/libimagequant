@@ -14,7 +14,7 @@ readme = "README.md"
 edition = "2024"
 links = "imagequant"
 build = "build.rs"
-rust-version = "1.64"
+rust-version = "1.85"
 
 [features]
 default = ["imagequant/default"]

@@ -12,7 +12,7 @@ keywords = ["quantization", "palette", "pngquant", "compression", "gif"]
 include = ["COPYRIGHT", "src/*.rs", "*.h", "README.md", "Cargo.toml"]
 readme = "README.md"
 edition = "2024"
-rust-version = "1.65"
+rust-version = "1.85"
 
 [features]
 default = ["threads", "std"]
